@@ -23,9 +23,9 @@ Stop:  Ctrl+C. Close the Arduino Serial Monitor first: only one program can open
 Note:  opening the port resets the Pro Mini (on the LoRa link that means a new TTN join).
 """
 
-import argparse, base64, json, pathlib, re, sys, threading, time
+import argparse, base64, ipaddress, json, pathlib, re, socket, sys, threading, time, urllib.request
 from datetime import datetime, timezone
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import serial, serial.tools.list_ports
 import paho.mqtt.client as mqtt
@@ -58,6 +58,45 @@ def parse_server(url):
         raise SystemExit(f'--server must look like wss://example.com/mqtt or mqtt://127.0.0.1:1883, got {url!r}')
     default_port, tls, transport = SCHEMES[u.scheme]
     return u.hostname, u.port or default_port, tls, transport, (u.path or '/mqtt')
+
+
+PUBLIC_DNS = ('https://dns.google/resolve?type=A&name=', 'https://cloudflare-dns.com/dns-query?type=A&name=')
+
+
+def pin_host(host):
+    """Make `host` resolvable for this process even when the PC's DNS server can't find it.
+
+    DTU's DNS server answered "does not exist" for the team's domain for a while on 26 Nov while
+    public DNS had it. If the normal lookup fails, ask public DNS-over-HTTPS once and pin the address
+    for this process only (nothing on the PC changes). TLS still checks the certificate against `host`.
+    Returns the pinned IP, or None when nothing had to be done (or nothing could be found).
+    """
+    try:
+        ipaddress.ip_address(host)
+        return None                                         # already an IP address
+    except ValueError:
+        pass
+    try:
+        socket.getaddrinfo(host, None)
+        return None                                         # the PC's DNS works (or it's pinned already)
+    except socket.gaierror:
+        pass
+    for base in PUBLIC_DNS:
+        try:
+            req = urllib.request.Request(base + quote(host), headers={'accept': 'application/dns-json'})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                ips = [a['data'] for a in json.load(r).get('Answer', []) if a.get('type') == 1]
+        except Exception:
+            continue
+        if ips:
+            ip, real = ips[0], socket.getaddrinfo
+
+            def getaddrinfo(h, *a, **k):
+                return real(ip if h == host else h, *a, **k)
+
+            socket.getaddrinfo = getaddrinfo
+            return ip
+    return None
 
 
 def find_port(preferred):
@@ -122,8 +161,18 @@ def main():
         c.publish(BRIDGE_TOPIC, 'online' if state['ser'] else 'offline', qos=1, retain=True)
         print(f'MQTT: connected to {where}, acting as TTN device {args.dev}', flush=True)
 
+    def check_dns():
+        ip = pin_host(host)
+        if ip:
+            print(f"DNS: this PC's DNS server can't find {host}; using {ip} from public DNS", flush=True)
+
     def on_disconnect(c, userdata, flags, reason, props):
         print(f'!! MQTT: disconnected ({reason}). Reconnecting...', flush=True)
+        check_dns()
+
+    def on_connect_fail(c, userdata):
+        print(f'!! MQTT: could not reach {where}. Retrying...', flush=True)
+        check_dns()
 
     def on_message(c, userdata, msg):
         if msg.topic == CMD_TOPIC:                          # test hook: virtual buttons / state request
@@ -163,7 +212,9 @@ def main():
     client.will_set(BRIDGE_TOPIC, 'offline', qos=1, retain=True)
     client.reconnect_delay_set(min_delay=2, max_delay=30)
     client.on_connect, client.on_disconnect, client.on_message = on_connect, on_disconnect, on_message
+    client.on_connect_fail = on_connect_fail
     print(f'MQTT: connecting to {where} as {args.user if args.password else "anonymous"}...', flush=True)
+    check_dns()
     client.connect_async(host, mqtt_port, keepalive=30)
     client.loop_start()
 
