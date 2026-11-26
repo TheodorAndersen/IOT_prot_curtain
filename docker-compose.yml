@@ -42,6 +42,14 @@ services:
       APP_ROOT_PATH: /api
       TRANSPORT_MODE: ${TRANSPORT_MODE:-ttn_mqtt}
       PROTOCOL_VERSION: ${PROTOCOL_VERSION:-v4}
+      # USB/TTN switch (Settings -> Connection in the app). The USB link goes through the mosquitto
+      # service below and usb_bridge/mqtt_usb_bridge.py on the PC with the board plugged in.
+      USB_MQTT_HOST: mosquitto
+      USB_MQTT_PORT: "1883"
+      LINK_DEFAULT: ${LINK_DEFAULT:-ttn}
+      LINK_STATE_FILE: /data/link_state.json
+    volumes:
+      - backend_data:/data
     networks:
       - db_internal
       - app_net
@@ -54,6 +62,26 @@ services:
       timeout: 3s
       retries: 15
       start_period: 3s
+    restart: unless-stopped
+
+  # MQTT broker for the USB link. Not published: the backend uses mqtt://mosquitto:1883 inside Docker,
+  # and the USB bridge on the PC comes in through nginx (ws://.../mqtt locally, wss://<DOMAIN>/mqtt in prod).
+  # No login by default; set USB_MQTT_PASSWORD (and optionally USB_MQTT_USERNAME, default "bridge") in .env
+  # to require one. Clients may only use the curtain's topics (deploy/mosquitto/entrypoint.sh).
+  mosquitto:
+    image: eclipse-mosquitto:2
+    environment:
+      USB_MQTT_USERNAME: ${USB_MQTT_USERNAME:-bridge}
+      USB_MQTT_PASSWORD: ${USB_MQTT_PASSWORD:-}
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./deploy/mosquitto/entrypoint.sh:/curtain-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/curtain-entrypoint.sh"]
+    expose:
+      - "1883"
+      - "9001"
+    networks:
+      - app_net
     restart: unless-stopped
 
   nginx:
@@ -73,3 +101,4 @@ services:
 
 volumes:
   postgres_data:
+  backend_data:

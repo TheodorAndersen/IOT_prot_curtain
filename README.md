@@ -8,6 +8,7 @@ Backend, REST API, LoRaWAN v4 codec, React SPA/PWA, and containerized deployment
 - **`backend` (`python:3.15-slim`)**: FastAPI + `asyncpg` + TTN MQTTS / `MockTransport` service driven declaratively by [`backend/protocol.json`](backend/protocol.json) (v4 default) or [`backend/protocol.v3.json`](backend/protocol.v3.json) (`PROTOCOL_VERSION=v3`). Exposes internal port `8000` only on `app_net` (zero host ports).
   - Specs & protocol: [`assets/PROTOCOL_FINAL.md`](assets/PROTOCOL_FINAL.md), [`assets/iot_curtain_motor_backend_specification.md`](assets/iot_curtain_motor_backend_specification.md), [`assets/iot_curtain_motor_frontend_specification.md`](assets/iot_curtain_motor_frontend_specification.md) (legacy docs are in [`assets/archived/`](assets/archived/)).
 - **`nginx` (`nginx:1.31.9-alpine`)**: Serves the built React SPA/PWA (`/` from [`FrontEnd/`](FrontEnd/)) and reverse-proxies REST calls (`/api/*` and `/health`) to `backend:8000` (pinned to `1.31.9` to avoid CVE-2026-123634). Bound strictly to `127.0.0.1:8080` locally, or `80`/`443` with TLS 1.2/1.3 in GCP production.
+- **`mosquitto` (`eclipse-mosquitto:2`)**: MQTT broker for the **USB link** of the app's USB/TTN switch (Settings → Connection). Zero host ports: the backend uses `mosquitto:1883`, and the USB bridge on the PC with the board plugged in ([`usb_bridge/`](usb_bridge/README.md)) comes in through nginx at `/mqtt` (WebSocket). No login by default (curtain topics only); set `USB_MQTT_PASSWORD` in `.env` to require one.
 - **`certbot` (`certbot/certbot:latest`)**: Let's Encrypt issuance and automatic 12-hour certificate renewal in GCP production.
 
 ---
@@ -33,6 +34,7 @@ Bound strictly to `127.0.0.1` on host port `${NGINX_HTTP_PORT:-8080}` (default `
 |---|---|
 | `http://backend:8000` (`app_net` bridge) | FastAPI backend container — internal only (not published to the host by `docker-compose.yml`) |
 | `postgres:5432` (`db_internal` `internal: true` bridge) | PostgreSQL 19 container — zero host ports; inspect via `docker compose exec postgres psql -U curtain -d curtain` |
+| `mosquitto:1883` / `mosquitto:9001` (`app_net` bridge) | USB-link MQTT broker — internal only; the USB bridge reaches port 9001 through nginx `/mqtt` |
 | `<TTN_REGION>.cloud.thethings.network:8883` (outbound TLS) | TTN MQTTS broker when `TRANSPORT_MODE=ttn_mqtt` (disabled when `TRANSPORT_MODE=mock`) |
 
 ### GCP Production (`deploy/gcp/docker-compose.prod.yml`) & Local Dev / Test Ports
@@ -40,10 +42,10 @@ Bound strictly to `127.0.0.1` on host port `${NGINX_HTTP_PORT:-8080}` (default `
 | Address | Purpose |
 |---|---|
 | `http://<DOMAIN>:80` | Let's Encrypt ACME challenge (`/.well-known/acme-challenge/`) & HTTP-to-HTTPS redirect |
-| `https://<DOMAIN>:443` | Production Web/PWA (`/`, `/login`, `/settings`, `/debug`), `/health`, and `/api/*` over TLS 1.2/1.3 |
+| `https://<DOMAIN>:443` | Production Web/PWA (`/`, `/login`, `/settings`, `/debug`, `/calibrate`), `/health`, and `/api/*` over TLS 1.2/1.3 |
+| `wss://<DOMAIN>/mqtt` | USB link: `python usb_bridge/mqtt_usb_bridge.py --server wss://<DOMAIN>/mqtt` on the PC with the board plugged in |
 | `http://localhost:5173` | Optional Vite dev server (`cd FrontEnd && npm run dev`; proxies `/api` and `/health` to `http://127.0.0.1:8000`) |
 | `http://127.0.0.1:8000` | Optional bare-metal FastAPI backend (`APP_HOST` / `APP_PORT` in `.env`, Swagger UI at `http://127.0.0.1:8000/docs`) |
-| `http://localhost:8080` | Local USB / TTN bench harness (`python FrontEnd/local_test/server.py`; conflicts with Docker `nginx` if both run on port `8080` simultaneously — change `NGINX_HTTP_PORT` or stop one first) |
 | `http://127.0.0.1:18080` | Temporary port used by `backend/tests/test_docker_e2e.py` (`curtain-e2e-test` Compose project) |
 
 ---
@@ -165,10 +167,12 @@ Invoke-RestMethod "http://127.0.0.1:8080/api/debug?limit=20" -Headers $headers
 - **React Web, PWA & Mobile App ([`FrontEnd/`](FrontEnd/)):** Implements [`assets/iot_curtain_motor_frontend_specification.md`](assets/iot_curtain_motor_frontend_specification.md) using React 19, TypeScript, Vite 6, TanStack Query, `vite-plugin-pwa`, and Capacitor (`FrontEnd/capacitor.config.ts`). Built automatically into the `nginx` container by [`FrontEnd/Dockerfile`](FrontEnd/Dockerfile).
   - **Local frontend dev:** In [`FrontEnd/`](FrontEnd/), run `npm install`, `npm run dev` (proxies `/api` and `/health` to `http://127.0.0.1:8000`), `npm test`, and `npm run build`.
   - **Native mobile (Capacitor):** Set `VITE_API_BASE_URL=https://<your-domain>/api` when building, then run `npx cap add ios` / `npx cap add android` and `npx cap sync` from [`FrontEnd/`](FrontEnd/).
-- **Local USB / TTN Bench Tool:** [`FrontEnd/local_test/`](FrontEnd/local_test/README.md) remains available for direct USB serial testing (`BTN U|D|S`, `TICK`, `CAL`, `LINK U|L`) against the Arduino Pro Mini in [`firmware/smart_curtain/`](firmware/smart_curtain/smart_curtain.ino).
+- **Calibration from the app (protocol v4.1):** Settings → Blind → Calibrate, or the banner on Home while the blind is uncalibrated. The app sends `[id] 05 01` (`POST /api/calibrate`) and then follows the steps on the blind's buttons: Down…Stop = bottom, Up…Stop = top. `/api/status` has `calibrating` and `calibrationStep` (`sending`, `bottom`, `top`).
+- **USB/TTN switch:** Settings → Connection (`PUT /api/link`, `/api/status` has `link` and `usbBridgeOnline`). USB = the board on a PC's USB port via [`usb_bridge/mqtt_usb_bridge.py`](usb_bridge/README.md), same FPort 1 bytes, no TTN downlink budget used. TTN = LoRaWAN, Class C.
+- **Firmware:** [`firmware/smart_curtain/`](firmware/smart_curtain/smart_curtain.ino) is v4.1b (protocol v4.1 + radio watchdog). Copy `Credentials.example.h` to `Credentials.h` with the OTAA keys (private, gitignored). Serial test lines over USB: `BTN U|D|S`, `TICK`, `CAL`, `STATE`, `LINK U|L`.
 
 ---
 
 ## 5. GCP Production Deployment (HTTPS)
 
-See [`deploy/gcp/README.md`](deploy/gcp/README.md) for the complete GCP Compute Engine VM, firewall, Let's Encrypt (`init-letsencrypt.sh`), and `systemd` setup (`deploy/gcp/docker-compose.prod.yml`). Ensure `POSTGRES_PASSWORD`, `DOMAIN`, and `CERTBOT_EMAIL` are set in `.env` before running `./deploy/gcp/init-letsencrypt.sh`.
+See [`deploy/gcp/README.md`](deploy/gcp/README.md) for the complete GCP Compute Engine VM, firewall, Let's Encrypt (`init-letsencrypt.sh`), and `systemd` setup (`deploy/gcp/docker-compose.prod.yml`). Ensure `POSTGRES_PASSWORD`, `DOMAIN`, and `CERTBOT_EMAIL` are set in `.env` before running `./deploy/gcp/init-letsencrypt.sh`. The USB link needs nothing extra (optional: `USB_MQTT_PASSWORD` to require a login).

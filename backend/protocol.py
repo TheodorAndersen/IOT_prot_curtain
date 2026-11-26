@@ -20,6 +20,7 @@ from models import (
 )
 
 _ENDIANNESS_PREFIXES = {">", "<", "!", "="}
+_OPTIONAL_COMMANDS = {CommandKind.CALIBRATE}  # v4.1 additions; protocol.v3.json may omit them
 _REQUIRED_STATE_FLAGS = (
     "automatic",
     "is_moving",
@@ -198,6 +199,8 @@ def load_protocol_spec(path: Path | str) -> ProtocolSpec:
     raw_cmds = dl_raw["commands"]
     for kind in CommandKind:
         if kind.value not in raw_cmds:
+            if kind in _OPTIONAL_COMMANDS:
+                continue
             raise ValueError(f"downlinks.commands missing required command {kind.value!r}")
         c_raw = raw_cmds[kind.value]
         c_struct = _compile_struct(c_raw["struct_format"], f"downlinks.commands.{kind.value}")
@@ -365,6 +368,7 @@ class ProtocolCodec:
             keep_indoor_light=bool(raw_flags & (1 << fb["keep_indoor_light"])),
             raw_flags=raw_flags,
             position=position,
+            is_calibrating="is_calibrating" in fb and bool(raw_flags & (1 << fb["is_calibrating"])),
         )
 
     def _decode_telemetry_uplink(self, payload: bytes) -> DecodedLightTelemetry:
@@ -594,6 +598,8 @@ class ProtocolCodec:
             flags |= 1 << fb["close_by_sun"]
         if state.keep_indoor_light:
             flags |= 1 << fb["keep_indoor_light"]
+        if state.is_calibrating and "is_calibrating" in fb:
+            flags |= 1 << fb["is_calibrating"]
 
         pos_byte = (
             su.uncalibrated_position
@@ -620,6 +626,7 @@ class ProtocolCodec:
             "openBySun": bool(raw_flags & (1 << fb["open_by_sun"])),
             "closeBySun": bool(raw_flags & (1 << fb["close_by_sun"])),
             "keepIndoorLight": bool(raw_flags & (1 << fb["keep_indoor_light"])),
+            "calibrating": "is_calibrating" in fb and bool(raw_flags & (1 << fb["is_calibrating"])),
         }
 
     def describe_command(
@@ -632,6 +639,8 @@ class ProtocolCodec:
             return f"{prefix}go to {args.get('position')} % closed"
         if kind_val == CommandKind.SET_MODE.value:
             return f"{prefix}mode {args.get('mode')}"
+        if kind_val == CommandKind.CALIBRATE.value:
+            return f"{prefix}start calibration (buttons set bottom, then top)"
         if kind_val == CommandKind.SET_SCHEDULE.value:
             action = args.get("action")
             detail = "open (day starts)" if action == "open" else "close (day ends)"

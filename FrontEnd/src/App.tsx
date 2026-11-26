@@ -7,6 +7,7 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { HomePage } from "./features/control/HomePage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { DebugPage } from "./features/debug/DebugPage";
+import { CalibratePage } from "./features/calibration/CalibratePage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,14 @@ export function AppRoutes() {
         element={
           <RequireAuth>
             <SettingsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/calibrate"
+        element={
+          <RequireAuth>
+            <CalibratePage />
           </RequireAuth>
         }
       />

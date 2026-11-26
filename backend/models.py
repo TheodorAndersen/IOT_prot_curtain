@@ -24,6 +24,7 @@ class CommandKind(str, Enum):
     SET_MODE = "set_mode"
     SET_AUTO_SETTINGS = "set_auto_settings"
     SET_SCHEDULE = "set_schedule"
+    CALIBRATE = "calibrate"  # v4.1: optional in protocol.json
 
 
 class CommandStatus(str, Enum):
@@ -52,6 +53,7 @@ class DecodedStateUplink:
     keep_indoor_light: bool
     raw_flags: int
     position: int | None
+    is_calibrating: bool = False  # v4.1 flag bit 7: calibration with the buttons in progress
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,12 @@ class AutoRequest(BaseModel):
     targetLightLevel: StrictInt = Field(ge=0, le=100)
 
 
+class LinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    link: Literal["usb", "ttn"]
+
+
 class SettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -177,6 +185,12 @@ class StatusResponse(BaseModel):
     downlinksUsed24h: int
     downlinkBudget24h: int
     downlinkNextSlotAt: str | None
+    calibrating: bool = False
+    # "sending": calibrate command on its way; "bottom"/"top": the device waits for that end
+    calibrationStep: Literal["sending", "bottom", "top"] | None = None
+    # USB/TTN switch (only when USB_MQTT_HOST is configured; otherwise None)
+    link: Literal["usb", "ttn"] | None = None
+    usbBridgeOnline: bool | None = None
 
 
 class DecodedFlagsModel(BaseModel):
@@ -187,6 +201,7 @@ class DecodedFlagsModel(BaseModel):
     openBySun: bool
     closeBySun: bool
     keepIndoorLight: bool
+    calibrating: bool = False
 
 
 class DebugSavedSettingsModel(BaseModel):

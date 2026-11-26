@@ -11,4 +11,7 @@ FrontEnd/android/
 *.tsbuildinfo
 firmware/smart_curtain/Credentials.h
 FrontEnd/local_test/ttn.json
+
+# USB/TTN switch state (local)
+backend/link_state.json
 dist-mobile/

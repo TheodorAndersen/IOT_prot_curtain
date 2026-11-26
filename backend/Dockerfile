@@ -10,8 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY config.py protocol.json protocol.v3.json protocol.py models.py transport.py db.py device_manager.py main.py ./
 
+# /data holds link_state.json (the USB/TTN switch); docker-compose mounts a volume there
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
-    && chown -R appuser:appuser /app
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
 
 USER appuser
 

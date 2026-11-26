@@ -444,6 +444,9 @@ def test_docker_full_stack_deployment_and_gcp_configs() -> None:
         prod_cfg = json.loads(prod_cfg_proc.stdout)
         assert "ports" not in prod_cfg["services"]["postgres"]
         assert "ports" not in prod_cfg["services"]["backend"]
+        # USB link broker: only reachable through nginx /mqtt, never published on the host
+        assert "ports" not in prod_cfg["services"]["mosquitto"]
+        assert prod_cfg["services"]["backend"]["environment"]["USB_MQTT_HOST"] == "mosquitto"
         assert "certbot" in prod_cfg["services"]
         published_ports = {
             str(p["published"]) for p in prod_cfg["services"]["nginx"]["ports"]

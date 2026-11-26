@@ -166,6 +166,18 @@ class DeviceManager:
         effective_mode = (
             row["desired_mode"] if row["has_pending_set_mode"] else row["mode"]
         )
+        fb = self.codec.spec.state_uplink.flag_bits
+        calibrating = "is_calibrating" in fb and bool(
+            int(row.get("device_flags") or 0) & (1 << fb["is_calibrating"])
+        )
+        if row.get("calibration_pending"):
+            calibration_step = "sending"
+        elif calibrating:
+            calibration_step = "top" if row["position"] == 100 else "bottom"
+        else:
+            calibration_step = None
+        link = getattr(self.transport, "link", None)
+        bridge_online = getattr(self.transport, "bridge_online", None)
         oldest_dl = row.get("oldest_downlink_sent_at")
         next_slot_at = (
             _fmt_utc(oldest_dl + timedelta(hours=24))
@@ -191,7 +203,27 @@ class DeviceManager:
             downlinksUsed24h=int(row.get("downlinks_used_24h") or 0),
             downlinkBudget24h=self.codec.spec.handshake.daily_downlink_warn_threshold,
             downlinkNextSlotAt=next_slot_at,
+            calibrating=calibrating,
+            calibrationStep=calibration_step,
+            link=link,
+            usbBridgeOnline=bridge_online,
         )
+
+    async def calibrate(self, user_id: uuid.UUID) -> None:
+        if CommandKind.CALIBRATE not in self.codec.spec.downlinks.commands:
+            raise BadRequestError("this protocol version has no calibrate command")
+        try:
+            await self.db.enqueue_calibrate(user_id)
+        except DatabaseConflictError as exc:
+            raise ConflictError(exc.message) from exc
+        self.dispatch_event.set()
+
+    async def set_link(self, user_id: uuid.UUID, link: str) -> None:
+        set_link = getattr(self.transport, "set_link", None)
+        if set_link is None:
+            raise BadRequestError("USB/TTN switching is not configured (set USB_MQTT_HOST)")
+        await set_link(link)
+        self.dispatch_event.set()
 
     async def set_position(self, user_id: uuid.UUID, position: int) -> None:
         try:
@@ -581,6 +613,8 @@ class DeviceManager:
                     action.payload,
                     confirmed=action.confirmed,
                 )
+                if getattr(self.transport, "link", "ttn") == "usb":
+                    continue  # USB test link: not radio airtime, so not counted against TTN fair use
                 rolling_count = await self.db.record_downlink_transmission(
                     device_id=dev["id"],
                     command_id=action.command_id,

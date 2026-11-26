@@ -10,6 +10,7 @@ import ssl
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -63,8 +64,18 @@ class TTNMqttTransport(LoRaTransport):
         mqtt_port: int = 8883,
         mqtt_use_tls: bool = True,
         mqtt_ca_certs: str = "",
+        extra_topics: tuple[str, ...] = (),
+        on_extra_message: Callable[[str, bytes], None] | None = None,
+        on_connected: Callable[[], None] | None = None,
+        login_username: str = "",
     ) -> None:
+        self._extra_topics = extra_topics
+        self._on_extra_message = on_extra_message
+        self._on_connected = on_connected
+        # TTN topics are namespaced by "<app>@<tenant>"; login_username only changes the MQTT login
+        # (used for the USB link's own broker, which has its own user).
         self._username = f"{ttn_appid}@{ttn_tenant}" if ttn_tenant else ttn_appid
+        self._login_username = login_username or self._username
         self._password = mqtt_api_key
         self._host = mqtt_host or f"{ttn_region}.cloud.thethings.network"
         self._port = mqtt_port
@@ -79,7 +90,7 @@ class TTNMqttTransport(LoRaTransport):
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             protocol=mqtt.MQTTv311,
         )
-        self._client.username_pw_set(self._username, self._password)
+        self._client.username_pw_set(self._login_username, self._password)
         if self._use_tls:
             self._client.tls_set(
                 ca_certs=mqtt_ca_certs or None,
@@ -107,7 +118,7 @@ class TTNMqttTransport(LoRaTransport):
             "TTN MQTT transport started (broker=%s:%s, username=%s, tls=%s)",
             self._host,
             self._port,
-            self._username,
+            self._login_username,
             self._use_tls,
         )
 
@@ -192,8 +203,17 @@ class TTNMqttTransport(LoRaTransport):
             (f"v3/{self._username}/devices/+/down/ack", 1),
             (f"v3/{self._username}/devices/+/down/nack", 1),
         ]
+        topics += [(t, 1) for t in self._extra_topics]
         client.subscribe(topics)
-        logger.info("Connected to TTN MQTT broker and subscribed to %d topic patterns", len(topics))
+        logger.info(
+            "Connected to MQTT broker %s and subscribed to %d topic patterns", self._host, len(topics)
+        )
+        if self._on_connected is not None:
+            self._on_connected()
+
+    def publish_raw(self, topic: str, payload: str, retain: bool = False) -> None:
+        """Publish a non-LoRaWAN control message (used by DualTransport on the local broker)."""
+        self._client.publish(topic, payload, qos=1, retain=retain)
 
     def _handle_disconnect(
         self,
@@ -213,6 +233,8 @@ class TTNMqttTransport(LoRaTransport):
             topic = msg.topic
             prefix = f"v3/{self._username}/devices/"
             if not topic.startswith(prefix):
+                if self._on_extra_message is not None and topic in self._extra_topics:
+                    self._on_extra_message(topic, msg.payload)
                 return
             rest = topic[len(prefix) :]
             if "/" not in rest:
@@ -282,6 +304,115 @@ def _parse_ttn_timestamp(ts_raw: Any) -> datetime:
     return datetime.now(timezone.utc)
 
 
+class DualTransport(LoRaTransport):
+    """USB test link and real TTN link side by side; exactly one is active.
+
+    usb: TTNMqttTransport on an MQTT broker where usb_bridge/mqtt_usb_bridge.py (on the PC with the
+    board plugged in) stands in for TTN and passes the same FPort 1 bytes to the board over the serial
+    port. The broker is local Mosquitto on a dev PC, or the `mosquitto` service in docker-compose on the
+    server (the bridge reaches it through nginx at wss://<DOMAIN>/mqtt). ttn: the real TTN MQTT transport.
+    Uplinks from the inactive link are ignored. The active link is saved in a small JSON file and
+    published retained on LINK_TOPIC, so the bridge can tell the board "LINK U" or "LINK L".
+    """
+
+    LINK_TOPIC = "curtain/link"
+    BRIDGE_TOPIC = "curtain/bridge"
+
+    def __init__(
+        self,
+        make_usb: Callable[..., TTNMqttTransport],
+        ttn: TTNMqttTransport,
+        link_default: str = "usb",
+        state_file: Path | None = None,
+    ) -> None:
+        self._state_file = state_file
+        self._link = self._load_link(link_default)
+        self._bridge_online = False
+        self._on_uplink: UplinkCallback | None = None
+        self.usb = make_usb(
+            extra_topics=(self.BRIDGE_TOPIC,),
+            on_extra_message=self._on_bridge_message,
+            on_connected=self._announce_link,
+        )
+        self.ttn = ttn
+
+    def _load_link(self, default: str) -> str:
+        try:
+            if self._state_file is not None and self._state_file.exists():
+                link = json.loads(self._state_file.read_text(encoding="utf-8")).get("link")
+                if link in ("usb", "ttn"):
+                    return link
+        except Exception:
+            logger.warning("Could not read %s; using link=%s", self._state_file, default)
+        return default
+
+    @property
+    def link(self) -> str:
+        return self._link
+
+    @property
+    def bridge_online(self) -> bool:
+        return self._bridge_online and self.usb.is_connected
+
+    @property
+    def active(self) -> TTNMqttTransport:
+        return self.usb if self._link == "usb" else self.ttn
+
+    @property
+    def is_connected(self) -> bool:
+        return self.active.is_connected
+
+    def _on_bridge_message(self, topic: str, payload: bytes) -> None:
+        self._bridge_online = payload.decode("utf-8", errors="replace").strip() == "online"
+        logger.info("USB bridge is %s", "online" if self._bridge_online else "offline")
+
+    def _announce_link(self) -> None:
+        self.usb.publish_raw(self.LINK_TOPIC, self._link, retain=True)
+
+    async def start(self, on_uplink: UplinkCallback) -> None:
+        self._on_uplink = on_uplink
+        await self.usb.start(self._from_usb)
+        await self.ttn.start(self._from_ttn)
+        logger.info("DualTransport started, active link: %s", self._link)
+
+    async def stop(self) -> None:
+        await self.usb.stop()
+        await self.ttn.stop()
+
+    async def _from_usb(self, dev_id: str, received_at: datetime, f_port: int, payload: bytes) -> None:
+        if self._link == "usb" and self._on_uplink is not None:
+            await self._on_uplink(dev_id, received_at, f_port, payload)
+        else:
+            logger.info("Ignoring USB uplink %s while the link is %s", payload.hex(), self._link)
+
+    async def _from_ttn(self, dev_id: str, received_at: datetime, f_port: int, payload: bytes) -> None:
+        if self._link == "ttn" and self._on_uplink is not None:
+            await self._on_uplink(dev_id, received_at, f_port, payload)
+        else:
+            logger.info("Ignoring TTN uplink %s while the link is %s", payload.hex(), self._link)
+
+    async def set_link(self, link: str) -> None:
+        if link not in ("usb", "ttn"):
+            raise ValueError(f"unknown link {link!r}")
+        self._link = link
+        if self._state_file is not None:
+            try:
+                self._state_file.write_text(json.dumps({"link": link}), encoding="utf-8")
+            except OSError:
+                logger.warning("Could not save the link to %s", self._state_file)
+        if self.usb.is_connected:
+            self._announce_link()
+        logger.info("Active link is now %s", link)
+
+    async def send_downlink(
+        self, dev_id: str, f_port: int, payload: bytes, confirmed: bool = False
+    ) -> None:
+        await self.active.send_downlink(dev_id, f_port, payload, confirmed)
+
+    async def clear_downlinks(self, dev_id: str) -> None:
+        await self.active.clear_downlinks(dev_id)
+
+
 class MockTransport(LoRaTransport):
     """In-memory local LoRaWAN device simulator driven by ProtocolCodec."""
 
@@ -313,6 +444,7 @@ class MockTransport(LoRaTransport):
         self.open_by_sun: bool = False
         self.close_by_sun: bool = True
         self.keep_indoor_light: bool = False
+        self.is_calibrating: bool = False
         self.last_cmd_id: int = 0
 
         self.sent_downlinks: list[DecodedDownlink] = []
@@ -429,6 +561,12 @@ class MockTransport(LoRaTransport):
             self.is_moving = False
             self.is_day = dl.args["action"] == "open"
             await self._emit_state("schedule")
+        elif dl.kind == CommandKind.CALIBRATE:
+            self.is_moving = False
+            self.mode = "manual"
+            self.is_calibrated = False
+            self.is_calibrating = True
+            await self._emit_state("app_command")
 
     async def _emit_state(self, reason: str) -> None:
         state = DecodedStateUplink(
@@ -443,6 +581,7 @@ class MockTransport(LoRaTransport):
             keep_indoor_light=self.keep_indoor_light,
             raw_flags=0,
             position=self.position if self.is_calibrated else None,
+            is_calibrating=self.is_calibrating,
         )
         f_port, payload = self._codec.encode_state_uplink(state)
         await self.inject_uplink(f_port, payload)
