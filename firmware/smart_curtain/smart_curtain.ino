@@ -1,14 +1,17 @@
-// Smart Curtains firmware · protocol v3 (see 05_final_project/lorawan/PROTOCOL.md)
+// Smart Curtains firmware v4.1b · protocol v4.1 = v4 + calibration from the app (see 05_final_project/lorawan/PROTOCOL.md)
+// v4.1b: radio watchdog. When the RN2483 stops answering, re-sync its baud rate, else reset it and rejoin.
 // Board: Arduino Pro Mini 3.3 V / 8 MHz. Wiring as in the 08_Curtain_Controller reference:
 //   A0 outdoor LDR · A1 indoor LDR · buttons UP D3, DOWN D4, STOP D5 (HIGH = pressed, external pull-downs)
-//   ULN2003 IN1..IN4 on D6..D9 · RN2483 TX → D10, RX ← D11, RST D12 · no home switch: calibrate by hand
+//   ULN2003 IN1..IN4 on D6..D9 · RN2483 TX → D10, RX ← D11, RST D12 · no home switch: calibrate with the buttons
+// Calibration (started by the app's "calibrate" downlink, "CAL" over USB, or any button while uncalibrated):
+//   DOWN runs the motor until STOP = the bottom, then UP runs it until STOP = the top. DOWN/UP can correct in between.
 //
 // The protocol bytes (FPort 1) travel over one of two links, chosen with "LINK U|L" over USB and saved in EEPROM:
 //   USB  (test): PC → Arduino "DL <hex>", Arduino → PC "UL <hex>", 9600 baud. The radio is held in reset.
 //   LoRa (live): the RN2483 joins TTN (OTAA, Class C when its firmware supports it) and carries the same bytes.
 // Always on USB, whichever link is active:
 //   "#..." debug lines (never sent over LoRa). "#R ..." = radio status, "#R> ..." = raw RN2483 reply.
-//   Test-only input: "BTN U|D|S" (virtual button), "TICK <seconds>" (decision interval), "CAL" (forget calibration),
+//   Test-only input: "BTN U|D|S" (virtual button), "TICK <seconds>" (decision interval), "CAL" (start calibration),
 //   "STATE", "LINK U|L", "RADIO <command>" (raw RN2483 command while joined, e.g. "RADIO mac get dr")
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
@@ -31,14 +34,16 @@ const byte RADIO_RX = 10, RADIO_TX = 11, RADIO_RST = 12;
 
 // ---------- protocol ----------
 enum { R_HEARTBEAT, R_STARTUP, R_BUTTON, R_APP, R_AUTO, R_SCHEDULE, R_CALIBRATED, R_REJECTED };
-enum { C_POSITION = 1, C_MODE = 2, C_AUTO = 3, C_SCHEDULE = 4 };
-enum { F_AUTO = 1, F_MOVING = 2, F_CAL = 4, F_DAY = 8 };       // uplink flags; bits 4-6 = auto config
-enum { A_SUN_OPEN = 1, A_SUN_CLOSE = 2, A_MAINTAIN = 4 };      // auto config bits (downlink AUTO byte 2)
+enum { C_POSITION = 1, C_MODE = 2, C_AUTO = 3, C_SCHEDULE = 4, C_CALIBRATE = 5 };
+enum { F_AUTO = 1, F_MOVING = 2, F_CAL = 4, F_DAY = 8, F_CALIBRATING = 128 };  // uplink flags; bits 4-6 = auto config
+enum { A_SUN_OPEN = 1, A_SUN_CLOSE = 2, A_MAINTAIN = 4 };      // auto config bits (downlink AUTO byte 2), saved
+enum { A_AUTOMATIC = 8, A_DAY = 16, A_SET_MODE = 32, A_SET_DAY = 64 };  // v4: mode and day in the same downlink
 enum { LINK_USB = 0, LINK_LORA = 1 };
 const unsigned long HEARTBEAT_MS = 3600000UL;
 const unsigned long POLL_MS = 60000UL;         // Class A only: a downlink can only arrive right after an uplink
 const int DEADBAND = 5;                        // % indoor light error ignored by "maintain light"
 const int MAX_STEP = 25;                       // max % of travel per decision
+const long MIN_TRAVEL = 200;                   // calibration: top must be at least this many steps above the bottom
 
 // ---------- saved state (EEPROM, written only when bytes change) ----------
 struct Saved {
@@ -54,7 +59,7 @@ int dir = 0;
 byte phase = 0, moveReason = R_BUTTON;
 long goal = 0;
 unsigned long lastStep = 0;
-bool calibrating = false;
+byte calStep = 0;                              // calibration: 0 off, 1 looking for the bottom, 2 looking for the top
 
 // ---------- light ----------
 unsigned long tickMs = 300000UL, tickStart = 0, lastSample = 0, sumOut = 0, sumIn = 0;
@@ -72,8 +77,9 @@ byte up[4], upSent[4], upTries = 0;            // LoRa: the latest state waiting
 bool upReady = false;
 
 byte pct(unsigned int adc) { return (adc * 100UL + 511) / 1023; }
-bool calibrated() { return st.travel > 0 && !calibrating; }
+bool calibrated() { return st.travel > 0 && !calStep; }
 byte positionClosed() {                        // UI convention: 0 = fully open, 100 = fully closed, 255 = unknown
+  if (calStep == 2) return 100;                // calibrating: bottom found (the app shows step 2)
   if (!calibrated()) return 255;
   return 100 - (st.pos * 100 + st.travel / 2) / st.travel;
 }
@@ -106,7 +112,7 @@ void sendState(byte reason, bool force) {
   havePending = false;
   lastSent = millis();
   byte f = (st.autoMode ? F_AUTO : 0) | (dir ? F_MOVING : 0) | (calibrated() ? F_CAL : 0) |
-           (st.dayOpen ? F_DAY : 0) | (st.config << 4);
+           (st.dayOpen ? F_DAY : 0) | (st.config << 4) | (calStep ? F_CALIBRATING : 0);
   byte b[4] = {st.lastId, reason, f, positionClosed()};
   if (st.link == LINK_LORA) { memcpy(up, b, 4); upReady = true; upTries = 0; return; }   // the radio sends it
   char h[9];
@@ -118,10 +124,11 @@ void sendState(byte reason) { sendState(reason, false); }
 void coilsOff() { for (byte i = 0; i < 4; i++) digitalWrite(COIL[i], LOW); }
 void halt() { dir = 0; goal = st.pos; coilsOff(); }
 void go(long dest, byte reason) {
-  if (!calibrating) dest = constrain(dest, 0L, st.travel);
+  if (!calStep) dest = constrain(dest, 0L, st.travel);
   goal = dest;
   moveReason = reason;
   dir = (goal > st.pos) - (goal < st.pos);
+  if (!dir) coilsOff();                        // a new goal at the current spot stops the motor
   lastStep = micros();
 }
 
@@ -133,7 +140,7 @@ void serviceMotor() {
   st.pos += dir;
   if (st.pos == goal) {
     halt();
-    if (!calibrating) { save(); sendState(moveReason, moveReason == R_APP || moveReason == R_SCHEDULE); }
+    if (!calStep) { save(); sendState(moveReason, moveReason == R_APP || moveReason == R_SCHEDULE); }
   }
 }
 
@@ -150,29 +157,40 @@ void decide(byte reason) {
     dest = abs(err) <= DEADBAND ? st.pos : st.pos + st.travel * constrain(err, -MAX_STEP, MAX_STEP) / 100;
   } else dest = st.travel;                                     // day: fully open
   dest = constrain(dest, 0L, st.travel);
+  if (dest == st.pos) halt();                                  // stay here (stops a move under way)
+  else if (dest != goal) go(dest, reason);                     // new goal (changes course mid-move)
   save();
-  if (dest != st.pos) go(dest, reason);
 }
 
 // ---------- buttons ----------
 bool raw[3], stable[3];
 unsigned long changedAt[3];
 
-void calibrationPress(byte b) {
-  if (b == 0) {                                                // UP: start from the bottom
-    if (!calibrating) { calibrating = true; st.pos = 0; st.travel = 0; Serial.println(F("# Calibrating: press STOP at the top")); }
-    go(2000000L, R_CALIBRATED);
-  } else if (b == 1) {                                         // DOWN: back toward the start
-    if (calibrating && st.pos > 0) go(0, R_CALIBRATED);
-  } else {                                                     // STOP: this is the top
+void startCalibration() {                                     // forget the old ends; the buttons set new ones
+  halt();
+  calStep = 1; st.travel = 0; st.pos = 0; st.autoMode = 0; save();
+  Serial.println(F("# Calibrating: DOWN to the bottom, then STOP"));
+}
+
+void calibrationPress(byte b) {                               // 0 UP, 1 DOWN, 2 STOP
+  if (!calStep) {                                             // uncalibrated: any button starts calibration
+    startCalibration();
+    sendState(R_BUTTON, true);
+    if (b == 2) return;
+  }
+  if (b == 0) go(st.pos + 2000000L, R_CALIBRATED);            // UP: run until STOP
+  else if (b == 1) go(calStep == 1 ? st.pos - 2000000L : 0, R_CALIBRATED);   // DOWN: run (step 2: not below the bottom)
+  else {                                                      // STOP: this is the end we were looking for
     halt();
-    if (calibrating && st.pos > 0) {
-      st.travel = st.pos;
-      calibrating = false;
-      save();
+    if (calStep == 1) {
+      st.pos = 0; goal = 0; calStep = 2;
+      Serial.println(F("# Bottom set: UP to the top, then STOP"));
+      sendState(R_BUTTON, true);
+    } else if (st.pos >= MIN_TRAVEL) {
+      st.travel = st.pos; calStep = 0; save();
       Serial.print(F("# Calibrated: travel steps ")); Serial.println(st.travel);
       sendState(R_CALIBRATED, true);
-    }
+    } else Serial.println(F("# Too short: UP to the top first, then STOP"));
   }
 }
 
@@ -204,8 +222,9 @@ void downlink(const byte *b, byte n) {
   switch (type) {
     case C_POSITION: ok = n == 3 && b[2] <= 100 && calibrated(); break;
     case C_MODE:     ok = n == 3 && b[2] <= 1; break;
-    case C_AUTO:     ok = n == 6 && b[2] <= 7 && b[3] <= 100 && b[4] <= 100 && b[5] < b[4]; break;
+    case C_AUTO:     ok = n == 6 && b[2] < 128 && b[3] <= 100 && b[4] <= 100 && b[5] < b[4]; break;
     case C_SCHEDULE: ok = n == 3 && b[2] <= 1; break;
+    case C_CALIBRATE: ok = n == 3 && b[2] == 1; break;
     default:         ok = false;
   }
   st.lastId = id;
@@ -220,23 +239,29 @@ void downlink(const byte *b, byte n) {
       st.autoMode = b[2];
       break;
     case C_AUTO:
-      st.config = b[2]; st.target = b[3]; st.thrOpen = b[4]; st.thrClose = b[5];
+      st.config = b[2] & 7; st.target = b[3]; st.thrOpen = b[4]; st.thrClose = b[5];
       openArmed = true;
+      if (b[2] & A_SET_MODE) st.autoMode = (b[2] & A_AUTOMATIC) != 0;
+      if (b[2] & A_SET_DAY) { st.dayOpen = (b[2] & A_DAY) != 0; if (!st.dayOpen) openArmed = false; }
       break;
     case C_SCHEDULE:
       st.dayOpen = b[2] == 0;
       if (!st.dayOpen) openArmed = false;
       break;
+    case C_CALIBRATE:
+      startCalibration();                        // the reply says "calibrating", position unknown
+      break;
   }
+  if (type != C_POSITION) decide(lastReplyReason);   // also mid-move: the newest command wins
   save();
-  sendState(lastReplyReason, true);              // "got it" before anything else happens
-  if (type != C_POSITION && !dir) decide(lastReplyReason);
+  sendState(lastReplyReason, true);              // "got it", with "moving" if the motor is about to run
 }
 
 // ---------- RN2483 LoRaWAN link (live) ----------
 // One command at a time, written one character per loop pass, so the motor and buttons never wait for the radio.
 SoftwareSerial radio(RADIO_RX, RADIO_TX);
-enum { RS_OFF, RS_RESET, RS_BOOT, RS_BAUD, RS_SETUP, RS_JOINING, RS_RETRY, RS_IDLE, RS_TX, RS_TX_WAIT, RS_RAW };
+enum { RS_OFF, RS_RESET, RS_BOOT, RS_BAUD, RS_SETUP, RS_JOINING, RS_RETRY, RS_IDLE, RS_TX, RS_TX_WAIT, RS_RAW,
+       RS_RESYNC, RS_RESYNC_CHECK };                     // watchdog: the radio stopped answering
 byte rs = RS_OFF, setupStep = 0, dr = 5, joinFails = 0;
 bool classC = false;
 unsigned long rsSince = 0, txAfter = 0;
@@ -324,6 +349,18 @@ void retryUplink(const char *why) {
 }
 void txDone() { Serial.println(F("#R tx ok")); enter(RS_IDLE); txAfter = millis() + 1000; }
 
+// Watchdog (26 Nov): after a command that moved the motor, the RN2483 sometimes went silent for good
+// (it had sent the reply, but every later command got no answer until a reset). Step 1: break + 0x55
+// re-syncs its baud rate and keeps the LoRaWAN session. Step 2, if it still says nothing: hardware reset + rejoin.
+void radioNoAnswer() {
+  Serial.println(F("#R tx error no answer, re-syncing the radio"));
+  if (!upReady && ++upTries < 6) { memcpy(up, upSent, 4); upReady = true; }   // unless a newer state replaced it
+  rOutLen = rOutPos = rInLen = 0;
+  digitalWrite(RADIO_TX, LOW); delay(10); digitalWrite(RADIO_TX, HIGH); delay(2);
+  radio.write((byte)0x55);
+  enter(RS_RESYNC);
+}
+
 void radioLine(char *s) {
   if (!strncmp(s, "mac_rx ", 7)) {                           // a downlink: Class A after our uplink, Class C any time
     Serial.print(F("#R rx ")); Serial.println(s + 7);
@@ -345,13 +382,20 @@ void radioLine(char *s) {
       break;
     case RS_TX:
       if (!strcmp(s, "ok")) enter(RS_TX_WAIT);
-      else if (!strcmp(s, "not_joined") || !strncmp(s, "frame_counter", 13)) { retryUplink(s); rejoinLater(s); }
+      else if (!strcmp(s, "not_joined") || !strncmp(s, "frame_counter", 13)) {   // session lost (e.g. the radio reset)
+        retryUplink(s);
+        if (joinFails) rejoinLater(s); else radioStart();                         // first time: rejoin at once
+      }
       else retryUplink(s);
       break;
     case RS_TX_WAIT:
       if (!strcmp(s, "mac_tx_ok")) txDone(); else retryUplink(s);
       break;
     case RS_RAW: Serial.print(F("#R> ")); Serial.println(s); enter(RS_IDLE); break;
+    case RS_RESYNC_CHECK:
+      if (!strncmp(s, "RN2483", 6)) { Serial.println(F("#R re-synced")); enter(RS_IDLE); txAfter = millis(); }
+      break;
+    case RS_IDLE: Serial.print(F("#R? ")); Serial.println(s); break;   // unexpected: log it (e.g. a garbled mac_rx)
     default: break;                                          // boot noise
   }
 }
@@ -379,7 +423,12 @@ void serviceRadio() {
     case RS_SETUP: if (t >= 5000) rejoinLater("no answer"); break;
     case RS_JOINING: if (t >= 20000) rejoinLater("join timeout"); break;
     case RS_RETRY: if (t >= 30000) radioStart(); break;
-    case RS_TX: case RS_TX_WAIT: if (t >= 20000) retryUplink("no answer"); break;
+    case RS_TX: if (t >= 3000) radioNoAnswer(); break;      // "ok" comes within milliseconds
+    case RS_TX_WAIT: if (t >= 20000) radioNoAnswer(); break;
+    case RS_RESYNC: if (t >= 100) { rInLen = 0; radioCmd(F("sys get ver"), "", RS_RESYNC_CHECK); } break;
+    case RS_RESYNC_CHECK:
+      if (t >= 2000) { Serial.println(F("#R still no answer, resetting the radio")); radioStart(); }
+      break;
     case RS_RAW: if (t >= 5000) { Serial.println(F("#R> (no answer)")); enter(RS_IDLE); } break;
     case RS_IDLE:
       if (upReady && (long)(millis() - txAfter) >= 0) {
@@ -409,8 +458,7 @@ void handleLine(char *s) {
     long sec = atol(s + 5);
     if (sec >= 5 && sec <= 3600) { tickMs = sec * 1000UL; tickStart = millis(); }
   } else if (!strcmp(s, "CAL")) {
-    halt(); calibrating = false; st.travel = 0; st.pos = 0; save();
-    Serial.println(F("# Calibration cleared: curtain fully down, press UP, then STOP at the top"));
+    startCalibration();
     sendState(R_HEARTBEAT, true);
   } else if (!strcmp(s, "STATE")) {
     sendState(R_HEARTBEAT, true);
@@ -484,10 +532,10 @@ void setup() {
   goal = st.pos;
   analogRead(PIN_OUT); outPct = pct(analogRead(PIN_OUT));
   analogRead(PIN_IN);  inPct = pct(analogRead(PIN_IN));
-  Serial.println(F("# Smart Curtains fw v3"));
+  Serial.println(F("# Smart Curtains fw v4.1b"));
   printLink();
   if (st.link == LINK_LORA) radioStart(); else radioStop();
-  if (!calibrated()) Serial.println(F("# Not calibrated: curtain fully down, press UP, then STOP at the top"));
+  if (!calibrated()) Serial.println(F("# Not calibrated: DOWN to the bottom, STOP, then UP to the top, STOP"));
   sendState(R_STARTUP, true);
 }
 

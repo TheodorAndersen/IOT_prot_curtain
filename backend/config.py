@@ -47,9 +47,11 @@ class Settings:
     protocol_version: str = "v4"
     handshake_timeout_sec: int | None = None
     app_root_path: str = ""
-    # USB/TTN switch: a second MQTT broker where local_test/mqtt_usb_bridge.py stands in for TTN over USB
+    # USB/TTN switch: a second MQTT broker where usb_bridge/mqtt_usb_bridge.py stands in for TTN over USB
     usb_mqtt_host: str = ""
     usb_mqtt_port: int = 1883
+    usb_mqtt_username: str = ""
+    usb_mqtt_password: str = ""
     link_default: str = "usb"
     link_state_file: Path | None = None
 
@@ -221,6 +223,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     usb_mqtt_host = _get_str(source, "USB_MQTT_HOST", "")
     usb_mqtt_port = _get_int(source, "USB_MQTT_PORT", 1883)
+    if not (1 <= usb_mqtt_port <= 65535):
+        raise ValueError(f"USB_MQTT_PORT must be in 1..65535, got {usb_mqtt_port}")
+    usb_mqtt_password = _get_str(source, "USB_MQTT_PASSWORD", "")
+    usb_mqtt_username = _get_str(source, "USB_MQTT_USERNAME", "") or ("bridge" if usb_mqtt_password else "")
     link_default = (_get_str(source, "LINK_DEFAULT", "usb") or "usb").lower()
     if link_default not in {"usb", "ttn"}:
         raise ValueError(f"LINK_DEFAULT must be 'usb' or 'ttn', got {link_default!r}")
@@ -258,6 +264,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         app_root_path=app_root_path,
         usb_mqtt_host=usb_mqtt_host,
         usb_mqtt_port=usb_mqtt_port,
+        usb_mqtt_username=usb_mqtt_username,
+        usb_mqtt_password=usb_mqtt_password,
         link_default=link_default,
         link_state_file=link_state_file,
     )

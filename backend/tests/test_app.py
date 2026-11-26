@@ -1437,6 +1437,34 @@ def test_load_settings_defaults_and_postgres_password() -> None:
     )
 
 
+def test_usb_link_settings_and_broker_login() -> None:
+    from transport import TTNMqttTransport
+
+    base_env = {"TTN_DEVID": "curtain-01", "TRANSPORT_MODE": "mock"}
+    off = load_settings(base_env)
+    assert off.usb_mqtt_host == "" and off.usb_mqtt_username == "" and off.usb_mqtt_password == ""
+    assert off.link_default == "usb"
+
+    # A password alone means the default "bridge" user (as in docker-compose's mosquitto service)
+    on = load_settings(
+        {**base_env, "USB_MQTT_HOST": "mosquitto", "USB_MQTT_PASSWORD": "s3cret", "LINK_DEFAULT": "ttn"}
+    )
+    assert (on.usb_mqtt_host, on.usb_mqtt_port) == ("mosquitto", 1883)
+    assert (on.usb_mqtt_username, on.usb_mqtt_password) == ("bridge", "s3cret")
+    assert on.link_default == "ttn"
+    named = load_settings({**base_env, "USB_MQTT_USERNAME": "board-pc", "USB_MQTT_PASSWORD": "x"})
+    assert named.usb_mqtt_username == "board-pc"
+    with pytest.raises(ValueError):
+        load_settings({**base_env, "USB_MQTT_PORT": "0"})
+
+    # The login user can differ from the TTN topic namespace "<app>@<tenant>"
+    usb = TTNMqttTransport("my-app", "s3cret", mqtt_host="mosquitto", mqtt_port=1883,
+                           mqtt_use_tls=False, login_username="bridge")
+    assert usb._username == "my-app@ttn" and usb._login_username == "bridge"
+    ttn = TTNMqttTransport("my-app", "NNSXS.key")
+    assert ttn._login_username == "my-app@ttn"
+
+
 @pytest.mark.asyncio
 async def test_sync_endpoint_and_rolling_24h_budget(
     caplog: pytest.LogCaptureFixture,

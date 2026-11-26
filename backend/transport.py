@@ -67,11 +67,15 @@ class TTNMqttTransport(LoRaTransport):
         extra_topics: tuple[str, ...] = (),
         on_extra_message: Callable[[str, bytes], None] | None = None,
         on_connected: Callable[[], None] | None = None,
+        login_username: str = "",
     ) -> None:
         self._extra_topics = extra_topics
         self._on_extra_message = on_extra_message
         self._on_connected = on_connected
+        # TTN topics are namespaced by "<app>@<tenant>"; login_username only changes the MQTT login
+        # (used for the USB link's own broker, which has its own user).
         self._username = f"{ttn_appid}@{ttn_tenant}" if ttn_tenant else ttn_appid
+        self._login_username = login_username or self._username
         self._password = mqtt_api_key
         self._host = mqtt_host or f"{ttn_region}.cloud.thethings.network"
         self._port = mqtt_port
@@ -86,7 +90,7 @@ class TTNMqttTransport(LoRaTransport):
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             protocol=mqtt.MQTTv311,
         )
-        self._client.username_pw_set(self._username, self._password)
+        self._client.username_pw_set(self._login_username, self._password)
         if self._use_tls:
             self._client.tls_set(
                 ca_certs=mqtt_ca_certs or None,
@@ -114,7 +118,7 @@ class TTNMqttTransport(LoRaTransport):
             "TTN MQTT transport started (broker=%s:%s, username=%s, tls=%s)",
             self._host,
             self._port,
-            self._username,
+            self._login_username,
             self._use_tls,
         )
 
@@ -303,8 +307,10 @@ def _parse_ttn_timestamp(ts_raw: Any) -> datetime:
 class DualTransport(LoRaTransport):
     """USB test link and real TTN link side by side; exactly one is active.
 
-    usb: TTNMqttTransport on a local broker where local_test/mqtt_usb_bridge.py stands in for TTN
-    (it passes the same FPort 1 bytes to the board over COM4). ttn: the real TTN MQTT transport.
+    usb: TTNMqttTransport on an MQTT broker where usb_bridge/mqtt_usb_bridge.py (on the PC with the
+    board plugged in) stands in for TTN and passes the same FPort 1 bytes to the board over the serial
+    port. The broker is local Mosquitto on a dev PC, or the `mosquitto` service in docker-compose on the
+    server (the bridge reaches it through nginx at wss://<DOMAIN>/mqtt). ttn: the real TTN MQTT transport.
     Uplinks from the inactive link are ignored. The active link is saved in a small JSON file and
     published retained on LINK_TOPIC, so the bridge can tell the board "LINK U" or "LINK L".
     """

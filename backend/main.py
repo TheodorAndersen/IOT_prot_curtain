@@ -97,16 +97,17 @@ def create_app(
                 mqtt_ca_certs=active_settings.ttn_mqtt_ca_certs,
             )
             if active_settings.usb_mqtt_host:
-                # USB/TTN switch: local broker + local_test/mqtt_usb_bridge.py, or real TTN
+                # USB/TTN switch: MQTT broker + usb_bridge/mqtt_usb_bridge.py on the PC, or real TTN
 
                 def make_usb(**hooks: Any) -> TTNMqttTransport:
                     return TTNMqttTransport(
                         ttn_appid=active_settings.ttn_appid,
-                        mqtt_api_key="local",
+                        mqtt_api_key=active_settings.usb_mqtt_password or "local",
                         ttn_tenant=active_settings.ttn_tenant,
                         mqtt_host=active_settings.usb_mqtt_host,
                         mqtt_port=active_settings.usb_mqtt_port,
                         mqtt_use_tls=False,
+                        login_username=active_settings.usb_mqtt_username,
                         **hooks,
                     )
 
