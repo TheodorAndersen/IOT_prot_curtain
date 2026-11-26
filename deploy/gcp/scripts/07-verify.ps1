@@ -19,7 +19,7 @@ if (($resolved | ForEach-Object { $_.IPAddress }) -notcontains $staticIp) {
 }
 
 Write-Host "==> [2/3] Checking VM resources, containers, published ports, and systemd..."
-$vmCheckCmd = (@"
+$vmCheckCmd = @"
 set -euo pipefail
 echo "--- Memory & Swap ---"
 free -h
@@ -28,12 +28,8 @@ cd "$appDir"
 sudo docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml ps
 echo "--- Systemd Auto-Start ---"
 systemctl is-enabled curtain-backend.service
-"@ -replace "`r`n", "`n")
-[void](Invoke-Gcloud -Arguments @(
-    "compute", "ssh", $vmName,
-    "--project=$project", "--zone=$zone",
-    "--command=$vmCheckCmd"
-))
+"@
+[void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $vmCheckCmd)
 
 Write-Host "`n==> [3/3] Checking HTTPS endpoints on https://$domain..."
 $health = Invoke-RestMethod -Uri "https://$domain/health" -TimeoutSec 15

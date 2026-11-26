@@ -114,6 +114,25 @@ function Invoke-Gcloud {
     return [int]$code
 }
 
+function Invoke-GcloudSshScript {
+    param(
+        [Parameter(Mandatory = $true)][string]$VmName,
+        [Parameter(Mandatory = $true)][string]$Project,
+        [Parameter(Mandatory = $true)][string]$Zone,
+        [Parameter(Mandatory = $true)][string]$Script,
+        [switch]$AllowFailure
+    )
+    $lfScript = $Script -replace "`r`n", "`n"
+    $b64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($lfScript))
+    $remoteCmd = "echo $b64 | base64 -d > /tmp/_curtain_cmd.sh && bash /tmp/_curtain_cmd.sh && rm -f /tmp/_curtain_cmd.sh"
+    return (Invoke-Gcloud -AllowFailure:$AllowFailure -Arguments @(
+        "compute", "ssh", $VmName,
+        "--project=$Project",
+        "--zone=$Zone",
+        "--command=$remoteCmd"
+    ))
+}
+
 function Invoke-GcloudValue {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,

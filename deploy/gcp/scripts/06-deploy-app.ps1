@@ -44,17 +44,13 @@ if (-not $SkipDnsCheck) {
 
 Write-Host "==> Verifying VM bootstrap on '$vmName'..."
 $checkBootstrapCmd = "test -f /var/log/curtain-bootstrap.done && docker compose version && swapon --show"
-$bootCode = Invoke-Gcloud -AllowFailure -Arguments @(
-    "compute", "ssh", $vmName,
-    "--project=$project", "--zone=$zone",
-    "--command=$checkBootstrapCmd"
-)
+$bootCode = Invoke-GcloudSshScript -AllowFailure -VmName $vmName -Project $project -Zone $zone -Script $checkBootstrapCmd
 if ($bootCode -ne 0) {
     throw "VM bootstrap not ready yet. Inspect /var/log/curtain-bootstrap.log on the VM and re-run once complete."
 }
 
 Write-Host "==> Cloning/updating repo at $appDir..."
-$repoPrepCmd = (@"
+$repoPrepCmd = @"
 set -euo pipefail
 if [[ ! -d "$appDir/.git" ]]; then
   sudo mkdir -p "$appDir"
@@ -64,12 +60,8 @@ else
   cd "$appDir"
   git pull --ff-only
 fi
-"@ -replace "`r`n", "`n")
-[void](Invoke-Gcloud -Arguments @(
-    "compute", "ssh", $vmName,
-    "--project=$project", "--zone=$zone",
-    "--command=$repoPrepCmd"
-))
+"@
+[void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $repoPrepCmd)
 
 Write-Host "==> Uploading .env securely to $appDir/.env..."
 $localEnv = Get-EnvFilePath
@@ -78,20 +70,16 @@ $localEnv = Get-EnvFilePath
     "--project=$project", "--zone=$zone"
 ))
 
-$envInstallCmd = (@"
+$envInstallCmd = @"
 set -euo pipefail
 sed -i 's/\r$//' /tmp/curtain.env.tmp
 mv /tmp/curtain.env.tmp "$appDir/.env"
 chmod 600 "$appDir/.env"
-"@ -replace "`r`n", "`n")
-[void](Invoke-Gcloud -Arguments @(
-    "compute", "ssh", $vmName,
-    "--project=$project", "--zone=$zone",
-    "--command=$envInstallCmd"
-))
+"@
+[void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $envInstallCmd)
 
 Write-Host "==> Starting/updating production stack & TLS on '$vmName'..."
-$deployCmd = (@"
+$deployCmd = @"
 set -euo pipefail
 cd "$appDir"
 chmod +x deploy/gcp/init-letsencrypt.sh
@@ -106,11 +94,7 @@ sudo cp deploy/gcp/curtain-backend.service /etc/systemd/system/curtain-backend.s
 sudo sed -i "s|/opt/iot_prot_curtain|$appDir|g" /etc/systemd/system/curtain-backend.service
 sudo systemctl daemon-reload
 sudo systemctl enable curtain-backend.service
-"@ -replace "`r`n", "`n")
-[void](Invoke-Gcloud -Arguments @(
-    "compute", "ssh", $vmName,
-    "--project=$project", "--zone=$zone",
-    "--command=$deployCmd"
-))
+"@
+[void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $deployCmd)
 
 Write-Host "`nDeployment complete. Run .\deploy\gcp\scripts\07-verify.ps1 to verify end-to-end."
