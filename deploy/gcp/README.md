@@ -22,7 +22,7 @@ All scripts read their settings from your local gitignored `.env` file (never co
 | 7 | `.\deploy\gcp\scripts\07-verify.ps1` | Verifies DNS, VM swap, `docker compose ps` (zero published ports on Postgres/Backend), `systemd`, and `https://$DOMAIN/health`, `/api/docs`, and `/`. |
 | 99 *(teardown)* | `.\deploy\gcp\scripts\99-teardown.ps1` | Dry-run by default. With `-ConfirmTeardown`, deletes the subdomain `A` record, VM (+ boot disk), firewall rule, and static IP while **preserving** the domain registration, Cloud DNS managed zone, and GCP project. |
 
-**USB link (Settings → Connection → USB cable):** nothing to set. Step 6 starts the `mosquitto` service, and the PC with the board plugged in runs `python usb_bridge/mqtt_usb_bridge.py --server wss://$DOMAIN/mqtt` (see [`usb_bridge/README.md`](../../usb_bridge/README.md)). It goes over 443, so nothing new to open in the firewall. No login by default (the broker only carries the curtain's topics); to require one, set `USB_MQTT_PASSWORD` in `.env` here and in the bridge PC's `.env`.
+**USB debug link (opt-in, off by default):** `mosquitto` is behind the `usb-debug` Compose profile and does **not** run in normal production. To debug a board over USB against the hosted server, set `COMPOSE_PROFILES=usb-debug`, `USB_MQTT_HOST=mosquitto`, and a strong `USB_MQTT_PASSWORD` in `.env`, re-run step 6, switch the link on `/debug`, and run `python usb_bridge/mqtt_usb_bridge.py --server wss://$DOMAIN/mqtt` on the PC (see [`usb_bridge/README.md`](../../usb_bridge/README.md)). It tunnels over HTTPS/WSS port 443. Remove those `.env` vars and re-run step 6 (`--remove-orphans`) when done debugging.
 
 ---
 

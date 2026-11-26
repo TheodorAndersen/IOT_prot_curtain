@@ -213,9 +213,42 @@ describe("DebugPage", () => {
     expect(screen.getAllByText(/60% open \(wire: 40% closed\)/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/2140 ms/).length).toBeGreaterThan(0);
     expect(screen.getByText(/In Sync/i)).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /USB cable/i })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /Force State Sync/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Send 1 downlink/i }));
     await waitFor(() => expect(syncSpy).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows and toggles USB/TTN link in debug page when USB debug link is enabled", async () => {
+    vi.spyOn(api, "getStatus").mockResolvedValue({
+      position: 40,
+      mode: "manual",
+      autoOpen: 0,
+      autoOpenTime: "07:30",
+      autoClose: 1,
+      autoCloseTime: "21:00",
+      maintainLight: 0,
+      targetLightLevel: 60,
+      outsideThresholdOpen: 80,
+      outsideThresholdClose: 10,
+      moving: false,
+      calibrated: true,
+      day: false,
+      targetPosition: null,
+      lastSeenAt: "2026-11-26T02:44:52Z",
+      downlinksUsed24h: 3,
+      downlinkBudget24h: 10,
+      downlinkNextSlotAt: null,
+      link: "ttn",
+      usbBridgeOnline: true,
+    });
+    vi.spyOn(api, "getDebug").mockResolvedValue(MOCK_DEBUG);
+    const linkSpy = vi.spyOn(api, "putLink").mockResolvedValue({ ok: true });
+
+    renderDebug();
+    const usbBtn = await screen.findByRole("radio", { name: /USB cable/i });
+    fireEvent.click(usbBtn);
+    await waitFor(() => expect(linkSpy).toHaveBeenCalledWith({ link: "usb" }));
   });
 });

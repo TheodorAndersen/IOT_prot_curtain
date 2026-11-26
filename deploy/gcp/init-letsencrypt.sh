@@ -51,7 +51,7 @@ volumes:
 EOF
 
 echo "[1/3] Starting HTTP-only stack for ACME HTTP-01 challenge..."
-docker compose -f docker-compose.yml -f "$BOOTSTRAP_COMPOSE" up -d --build postgres backend mosquitto nginx
+docker compose -f docker-compose.yml -f "$BOOTSTRAP_COMPOSE" up -d --build postgres backend nginx
 
 echo "[2/3] Requesting Let's Encrypt certificate for $DOMAIN..."
 docker ps -aq --filter "name=certbot-run" | xargs -r docker rm -f >/dev/null 2>&1 || true
@@ -62,7 +62,7 @@ docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml run -
   --agree-tos --no-eff-email --non-interactive
 
 echo "[3/3] Starting full HTTPS production stack..."
-docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml up -d --build --force-recreate mosquitto nginx certbot
+docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml up -d --build --force-recreate nginx certbot
 
 echo "Verifying HTTPS health endpoint..."
 curl -fsS --retry 5 --retry-delay 2 --retry-connrefused "https://${DOMAIN}/health"

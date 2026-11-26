@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Capacitor } from "@capacitor/core";
-import { Broadcast, SignOut, Sun, SunDim, Usb } from "@phosphor-icons/react";
+import { SignOut, Sun, SunDim } from "@phosphor-icons/react";
 import { getApiBaseUrl, setApiBaseUrl } from "../../api/client";
 import { api } from "../../api/endpoints";
 import { AppShell } from "../../components/AppShell";
@@ -12,7 +12,6 @@ import { useAuth } from "../../hooks/useAuth";
 import { useStatusPolling } from "../../hooks/useStatusPolling";
 import { useTheme, type ThemeChoice } from "../../hooks/useTheme";
 import { useI18n } from "../../i18n";
-import type { Link as LinkKind } from "../../types/api";
 import { storage } from "../../utils/storage";
 
 export function SettingsPage() {
@@ -63,22 +62,6 @@ export function SettingsPage() {
       );
     },
   });
-
-  const linkMutation = useMutation({
-    mutationFn: (link: LinkKind) => api.putLink({ link }),
-    onSuccess: (_res, link) => {
-      setToastMsg(t("link.switched", { link: link === "usb" ? t("link.usb") : t("link.ttn") }));
-      void queryClient.invalidateQueries({ queryKey: ["status"] });
-    },
-    onError: (err) => {
-      setToastMsg(
-        t("toast.error", { msg: err instanceof Error ? err.message : t("err.network") })
-      );
-    },
-  });
-  const shownLink: LinkKind | null = linkMutation.isPending
-    ? (linkMutation.variables ?? null)
-    : (status?.link ?? null);
 
   const handleOpenSlider = (val: number) => {
     let nextOpen = val;
@@ -142,52 +125,6 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
-
-      {status?.link != null && (
-        <section className="group" aria-labelledby="h-link">
-          <h2 className="group-title" id="h-link">
-            {t("link.title")}
-          </h2>
-          <div className="card">
-            <div className="row">
-              <div className="seg seg-lg" role="radiogroup" aria-labelledby="h-link">
-                {(["usb", "ttn"] as LinkKind[]).map((l) => (
-                  <button
-                    key={l}
-                    type="button"
-                    role="radio"
-                    aria-checked={shownLink === l}
-                    className={`seg-btn${shownLink === l ? " active" : ""}`}
-                    disabled={linkMutation.isPending}
-                    onClick={() => {
-                      if (status?.link !== l) linkMutation.mutate(l);
-                    }}
-                  >
-                    {l === "usb" ? (
-                      <Usb size={20} aria-hidden="true" />
-                    ) : (
-                      <Broadcast size={20} aria-hidden="true" />
-                    )}
-                    <span>{l === "usb" ? t("link.usb") : t("link.ttn")}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="row">
-              <p className="link-state">
-                <span
-                  className={`link-dot${status.usbBridgeOnline ? " on" : ""}`}
-                  aria-hidden="true"
-                />
-                {status.usbBridgeOnline ? t("link.pcOnline") : t("link.pcOffline")}
-              </p>
-            </div>
-          </div>
-          <p className="group-note">
-            {shownLink === "usb" ? t("link.noteUsb") : t("link.noteTtn")}
-          </p>
-        </section>
-      )}
 
       <section className="group" aria-labelledby="h-sun">
         <h2 className="group-title" id="h-sun">

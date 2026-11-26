@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowsClockwise, Copy } from "@phosphor-icons/react";
+import { ArrowsClockwise, Broadcast, Copy, Usb } from "@phosphor-icons/react";
 import { api } from "../../api/endpoints";
 import { AppShell } from "../../components/AppShell";
 import { Toast } from "../../components/Toast";
 import { useDebugPolling, type DebugIntervalMs } from "../../hooks/useDebugPolling";
+import { useStatusPolling } from "../../hooks/useStatusPolling";
 import { useI18n } from "../../i18n";
+import type { Link as LinkKind } from "../../types/api";
 import {
   closedToOpenPct,
   formatLocalClock,
@@ -28,6 +30,25 @@ export function DebugPage() {
 
   const debugQ = useDebugPolling(intervalMs, 20);
   const data = debugQ.data;
+  const statusQ = useStatusPolling(false);
+  const status = statusQ.data;
+
+  const linkMutation = useMutation({
+    mutationFn: (link: LinkKind) => api.putLink({ link }),
+    onSuccess: (_res, link) => {
+      setToastMsg(t("link.switched", { link: link === "usb" ? t("link.usb") : t("link.ttn") }));
+      void queryClient.invalidateQueries({ queryKey: ["status"] });
+      void queryClient.invalidateQueries({ queryKey: ["debug"] });
+    },
+    onError: (err) => {
+      setToastMsg(
+        t("toast.error", { msg: err instanceof Error ? err.message : t("err.network") })
+      );
+    },
+  });
+  const shownLink: LinkKind | null = linkMutation.isPending
+    ? (linkMutation.variables ?? null)
+    : (status?.link ?? null);
 
   const syncMutation = useMutation({
     mutationFn: () => api.postSync(),
@@ -181,6 +202,50 @@ export function DebugPage() {
               </p>
             </div>
           </section>
+
+          {/* Optional USB/TTN Debug Transport Switch (only when USB_MQTT_HOST is enabled) */}
+          {status?.link != null && (
+            <section className="dcard" aria-labelledby="h-debug-link">
+              <h2 id="h-debug-link">
+                <span>{t("link.title")}</span>
+                <span className={`pill ${status.usbBridgeOnline ? "ok" : "warn"}`}>
+                  {shownLink === "usb" ? t("link.pillUsb") : t("link.pillTtn")}
+                </span>
+              </h2>
+              <div className="seg seg-lg" role="radiogroup" aria-labelledby="h-debug-link">
+                {(["usb", "ttn"] as LinkKind[]).map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    role="radio"
+                    aria-checked={shownLink === l}
+                    className={`seg-btn${shownLink === l ? " active" : ""}`}
+                    disabled={linkMutation.isPending}
+                    onClick={() => {
+                      if (status?.link !== l) linkMutation.mutate(l);
+                    }}
+                  >
+                    {l === "usb" ? (
+                      <Usb size={20} aria-hidden="true" />
+                    ) : (
+                      <Broadcast size={20} aria-hidden="true" />
+                    )}
+                    <span>{l === "usb" ? t("link.usb") : t("link.ttn")}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="link-state" style={{ marginTop: 10 }}>
+                <span
+                  className={`link-dot${status.usbBridgeOnline ? " on" : ""}`}
+                  aria-hidden="true"
+                />
+                {status.usbBridgeOnline ? t("link.pcOnline") : t("link.pcOffline")}
+              </p>
+              <p className="group-note" style={{ margin: "6px 0 0" }}>
+                {shownLink === "usb" ? t("link.noteUsb") : t("link.noteTtn")}
+              </p>
+            </section>
+          )}
 
           {/* Card 2: Live Device State & Flags */}
           <section className="dcard">

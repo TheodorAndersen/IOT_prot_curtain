@@ -1,13 +1,29 @@
-# USB bridge (USB/TTN switch)
+# USB bridge (USB/TTN debug switch)
 
-The app has a switch in **Settings → Connection**: *USB cable* or *LoRaWAN (TTN)*. Both carry exactly the same LoRaWAN payload bytes (FPort 1, see [assets/PROTOCOL_FINAL.md](../assets/PROTOCOL_FINAL.md)). Only the transport differs:
+When opted in, **`/debug` (Debug page)** shows a link switch: *USB cable* or *LoRaWAN (TTN)*. Both carry the exact same LoRaWAN payload bytes (FPort 1, see [assets/PROTOCOL_FINAL.md](../assets/PROTOCOL_FINAL.md)). Only the transport differs:
 
 ```
 USB link:  app ─/api─▶ backend ─MQTT─▶ mosquitto ◀─wss://<DOMAIN>/mqtt─ mqtt_usb_bridge.py (PC) ─COM port "DL/UL <hex>"─▶ Pro Mini
 TTN link:  app ─/api─▶ backend ─MQTT─▶ TTN eu1 ─▶ gateway ─LoRa─▶ RN2483 ─▶ Pro Mini
 ```
 
-`mqtt_usb_bridge.py` runs on the PC the board is plugged into. It stands in for TTN on the USB link, follows the switch (tells the board `LINK U` or `LINK L`, which the board saves in EEPROM), and reports `online`/`offline` so the app can show "Blind connected to the PC". On the TTN link it only powers the board and prints its log. It reopens the COM port by itself if the USB adapter drops out.
+`mqtt_usb_bridge.py` runs on the PC the board is plugged into. It stands in for TTN on the USB link, follows the switch (tells the board `LINK U` or `LINK L`, which the board saves in EEPROM), and reports `online`/`offline` so `/debug` can show "Blind connected to the PC". On the TTN link it only powers the board and prints its log. It reopens the COM port by itself if the USB adapter drops out.
+
+## Enable USB debugging on Docker / hosted server
+
+By default `mosquitto` does **not** start and `DualTransport` is off (the switch is hidden from `/debug` and no MQTT broker runs). To opt in while debugging with a physical board:
+
+1. Add to the server's `.env` (and set a strong password since `/mqtt` is exposed on port 443):
+   ```dotenv
+   COMPOSE_PROFILES=usb-debug
+   USB_MQTT_HOST=mosquitto
+   USB_MQTT_USERNAME=bridge
+   USB_MQTT_PASSWORD=<strong-password>
+   ```
+2. Start or redeploy the stack (`docker compose up -d` locally or `.\deploy\gcp\scripts\06-deploy-app.ps1` on GCP).
+3. Switch between **USB cable** and **LoRaWAN (TTN)** on the **`/debug`** page.
+
+When finished debugging, remove `COMPOSE_PROFILES` and `USB_MQTT_HOST` from `.env` and redeploy (`--remove-orphans` stops `mosquitto`).
 
 ## Run it
 

@@ -444,10 +444,25 @@ def test_docker_full_stack_deployment_and_gcp_configs() -> None:
         prod_cfg = json.loads(prod_cfg_proc.stdout)
         assert "ports" not in prod_cfg["services"]["postgres"]
         assert "ports" not in prod_cfg["services"]["backend"]
-        # USB link broker: only reachable through nginx /mqtt, never published on the host
-        assert "ports" not in prod_cfg["services"]["mosquitto"]
-        assert prod_cfg["services"]["backend"]["environment"]["USB_MQTT_HOST"] == "mosquitto"
+        # Mosquitto is opt-in via COMPOSE_PROFILES=usb-debug; normal prod runs without it
+        assert "mosquitto" not in prod_cfg["services"]
+        assert prod_cfg["services"]["backend"]["environment"]["USB_MQTT_HOST"] == ""
         assert "certbot" in prod_cfg["services"]
+
+        usb_debug_env = {
+            **prod_env,
+            "COMPOSE_PROFILES": "usb-debug",
+            "USB_MQTT_HOST": "mosquitto",
+        }
+        usb_cfg_proc = _compose(
+            ["config", "--format", "json"],
+            env=usb_debug_env,
+            files=["docker-compose.yml", "deploy/gcp/docker-compose.prod.yml"],
+            project=None,
+        )
+        usb_cfg = json.loads(usb_cfg_proc.stdout)
+        assert "ports" not in usb_cfg["services"]["mosquitto"]
+        assert usb_cfg["services"]["backend"]["environment"]["USB_MQTT_HOST"] == "mosquitto"
         published_ports = {
             str(p["published"]) for p in prod_cfg["services"]["nginx"]["ports"]
         }

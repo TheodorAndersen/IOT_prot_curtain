@@ -119,7 +119,7 @@ set -euo pipefail
 cd "$appDir"
 if sudo docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml run --rm --no-deps --entrypoint sh certbot -c "test -s /etc/letsencrypt/live/$domain/fullchain.pem" >/dev/null 2>&1; then
   echo "Existing TLS certificate found for $domain; rebuilding and restarting services..."
-  sudo docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml up -d --build
+  sudo docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml up -d --build --remove-orphans
 else
   echo "No TLS certificate found for $domain yet; running init-letsencrypt.sh..."
   sudo bash deploy/gcp/init-letsencrypt.sh
