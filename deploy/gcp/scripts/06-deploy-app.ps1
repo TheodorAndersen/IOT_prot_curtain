@@ -90,6 +90,8 @@ if [[ ! -d "$appDir/.git" ]]; then
   git clone "$repoUrl" "$appDir"
 else
   cd "$appDir"
+  git config core.fileMode false
+  git checkout -- .
   git pull --ff-only
 fi
 "@
@@ -115,13 +117,12 @@ Write-Host "==> Starting/updating production stack & TLS on '$vmName'..."
 $deployCmd = @"
 set -euo pipefail
 cd "$appDir"
-chmod +x deploy/gcp/init-letsencrypt.sh
 if sudo docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml run --rm --no-deps --entrypoint sh certbot -c "test -s /etc/letsencrypt/live/$domain/fullchain.pem" >/dev/null 2>&1; then
   echo "Existing TLS certificate found for $domain; rebuilding and restarting services..."
   sudo docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml up -d --build
 else
   echo "No TLS certificate found for $domain yet; running init-letsencrypt.sh..."
-  sudo ./deploy/gcp/init-letsencrypt.sh
+  sudo bash deploy/gcp/init-letsencrypt.sh
 fi
 sudo cp deploy/gcp/curtain-backend.service /etc/systemd/system/curtain-backend.service
 sudo sed -i "s|/opt/iot_prot_curtain|$appDir|g" /etc/systemd/system/curtain-backend.service
