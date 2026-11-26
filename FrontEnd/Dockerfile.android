@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+
+FROM eclipse-temurin:21-jdk-jammy AS base
+
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=/opt/android-sdk
+ENV PATH=${PATH}:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      unzip \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /opt/android-sdk/cmdline-tools \
+    && curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip \
+    && unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools \
+    && mv /tmp/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
+    && rm -rf /tmp/cmdline-tools.zip /tmp/cmdline-tools \
+    && ({ yes || true; } | sdkmanager --licenses >/dev/null) \
+    && sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+FROM base AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --no-audit --no-fund
+
+FROM deps AS builder
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV CAPACITOR_BUILD=1
+
+COPY . .
+RUN npm run build \
+    && rm -rf android \
+    && npx cap add android \
+    && mkdir -p assets \
+    && cp public/icons/icon-512.png assets/icon-only.png \
+    && cp public/icons/icon-512.png assets/splash.png \
+    && npx --yes @capacitor/assets generate --android \
+         --iconBackgroundColor "#f2f3f5" \
+         --iconBackgroundColorDark "#0d0e11" \
+         --splashBackgroundColor "#f2f3f5" \
+         --splashBackgroundColorDark "#0d0e11" \
+    && if [ ! -f android/app/src/main/res/mipmap-mdpi/ic_launcher_background.png ]; then \
+         sed -i 's|@mipmap/ic_launcher_background|@color/ic_launcher_background|g' android/app/src/main/res/mipmap-anydpi-v26/ic_launcher*.xml && \
+         printf '<resources>\n    <color name="ic_launcher_background">#f2f3f5</color>\n</resources>\n' > android/app/src/main/res/values/ic_launcher_background.xml; \
+       fi \
+    && npx cap sync android \
+    && cd android \
+    && chmod +x gradlew \
+    && ./gradlew assembleDebug --no-daemon
+
+FROM scratch AS export
+COPY --from=builder /app/android/app/build/outputs/apk/debug/app-debug.apk /SmartCurtain-debug.apk

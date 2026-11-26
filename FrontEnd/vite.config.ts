@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      disable: process.env.CAPACITOR_BUILD === "1",
       registerType: "autoUpdate",
       includeAssets: [
         "icons/apple-touch-icon.png",
