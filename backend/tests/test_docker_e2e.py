@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -109,12 +110,32 @@ def test_docker_full_stack_deployment_and_gcp_configs() -> None:
         "TRANSPORT_MODE": "mock",
         "PROTOCOL_VERSION": "v4",
         "NGINX_HTTP_PORT": str(NGINX_PORT),
+        "COMPOSE_PROFILES": "",
+        "USB_MQTT_HOST": "",
     }
 
-    _compose(["down", "-v", "--remove-orphans"], env=compose_env, check=False)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".yml",
+        prefix="curtain-e2e-override-",
+        delete=False,
+        encoding="utf-8",
+    ) as tmp:
+        tmp.write(
+            "services:\n"
+            "  backend:\n"
+            "    environment:\n"
+            '      DEMO_USER_EMAIL: "demo@example.com"\n'
+            '      DEMO_USER_PASSWORD: ""\n'
+            f'      DEMO_USER_PASSWORD_MD5: "{DEMO_MD5}"\n'
+        )
+        override_path = Path(tmp.name)
+
+    compose_files = ["docker-compose.yml", str(override_path)]
+    _compose(["down", "-v", "--remove-orphans"], env=compose_env, files=compose_files, check=False)
 
     try:
-        _compose(["up", "-d", "--build", "--wait"], env=compose_env)
+        _compose(["up", "-d", "--build", "--wait"], env=compose_env, files=compose_files)
 
         # ------------------------------------------------------------------
         # 1. Container isolation, security & software version checks
@@ -500,4 +521,5 @@ def test_docker_full_stack_deployment_and_gcp_configs() -> None:
             ]
         )
     finally:
-        _compose(["down", "-v", "--remove-orphans"], env=compose_env, check=False)
+        _compose(["down", "-v", "--remove-orphans"], env=compose_env, files=compose_files, check=False)
+        override_path.unlink(missing_ok=True)
