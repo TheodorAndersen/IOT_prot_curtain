@@ -8,6 +8,24 @@ This setup deploys the IoT Smart Curtain backend on a single GCP Compute Engine 
 
 ---
 
+## Option A: Scripted Component-by-Component Deployment (`deploy/gcp/scripts/`, Windows PowerShell)
+
+All scripts read their settings from your local gitignored `.env` file (never committing private project IDs or domains). Fill in the `GCP_*`, `DEPLOY_*`, `DOMAIN`, and `CERTBOT_EMAIL` keys in `.env` first, then run and verify each component one step at a time:
+
+| Step | Script | Purpose & What to Verify |
+| :--- | :--- | :--- |
+| 1 | `.\deploy\gcp\scripts\01-static-ip.ps1` | Reserves the regional static external IPv4 and writes `GCP_STATIC_IP` into `.env`. |
+| 2 | `.\deploy\gcp\scripts\02-firewall.ps1` | Opens **only** `tcp:80,tcp:443` for tag `GCP_NETWORK_TAG` (keeps `5432` & `8000` closed). |
+| 3 | `.\deploy\gcp\scripts\03-vm.ps1` | Creates the Ubuntu 24.04 VM (`e2-small`, 20 GB disk) with `vm-bootstrap.sh` (2 GB swap + Docker Engine + Compose). Wait 1-2 min and run the printed `gcloud compute ssh` check until `/var/log/curtain-bootstrap.done` exists. |
+| 4 | `.\deploy\gcp\scripts\04-dns.ps1` | Creates/updates the Cloud DNS `A` record for `DOMAIN` → `GCP_STATIC_IP` and checks resolution. |
+| 6 | `.\deploy\gcp\scripts\06-deploy-app.ps1` | Clones/pulls `DEPLOY_REPO_URL` into `DEPLOY_APP_DIR`, uploads `.env` (`chmod 600`), issues the Let's Encrypt cert on first run (`init-letsencrypt.sh`) or rebuilds on redeploy, and enables `curtain-backend.service`. |
+| 7 | `.\deploy\gcp\scripts\07-verify.ps1` | Verifies DNS, VM swap, `docker compose ps` (zero published ports on Postgres/Backend), `systemd`, and `https://$DOMAIN/health`, `/api/docs`, and `/`. |
+| 99 *(teardown)* | `.\deploy\gcp\scripts\99-teardown.ps1` | Dry-run by default. With `-ConfirmTeardown`, deletes the subdomain `A` record, VM (+ boot disk), firewall rule, and static IP while **preserving** the domain registration, Cloud DNS managed zone, and GCP project. |
+
+---
+
+## Option B: Manual Steps on the VM
+
 ## 1. Provision GCP VM & Firewall Rules
 
 1. Create an Ubuntu/Debian Compute Engine VM (e.g., `e2-micro` or `e2-small`) with a static external IP, tagged e.g. `curtain-https`, and point your DNS `A` record (`curtain.example.com`) to that IP.

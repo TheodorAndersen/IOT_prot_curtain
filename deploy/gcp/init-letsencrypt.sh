@@ -9,10 +9,18 @@ if [[ ! -f ".env" ]]; then
   exit 1
 fi
 
-set -a
-# shellcheck disable=SC1091
-source ".env"
-set +a
+while IFS= read -r line || [[ -n "$line" ]]; do
+  line="${line%$'\r'}"
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+  if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+    key="${BASH_REMATCH[1]}"
+    val="${BASH_REMATCH[2]}"
+    if [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]]; then
+      val="${BASH_REMATCH[1]}"
+    fi
+    export "${key}=${val}"
+  fi
+done < ".env"
 
 : "${DOMAIN:?DOMAIN must be set in .env}"
 : "${CERTBOT_EMAIL:?CERTBOT_EMAIL must be set in .env}"

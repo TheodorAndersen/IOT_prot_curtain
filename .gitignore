@@ -9,3 +9,5 @@ FrontEnd/dist/
 FrontEnd/ios/
 FrontEnd/android/
 *.tsbuildinfo
+firmware/smart_curtain/Credentials.h
+FrontEnd/local_test/ttn.json
