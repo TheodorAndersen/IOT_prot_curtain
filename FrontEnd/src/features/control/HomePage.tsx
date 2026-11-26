@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Hand, SunHorizon, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsVertical, Hand, SunHorizon, WarningCircle } from "@phosphor-icons/react";
 import { api } from "../../api/endpoints";
 import { AppShell } from "../../components/AppShell";
 import { BudgetBadge } from "../../components/BudgetBadge";
@@ -332,7 +332,8 @@ export function HomePage() {
             )}
           </p>
         </div>
-        {status && (
+        {status && status.link === "usb" && <span className="pill">{t("link.pillUsb")}</span>}
+        {status && status.link !== "usb" && (
           <BudgetBadge
             used={status.downlinksUsed24h}
             budget={status.downlinkBudget24h}
@@ -343,21 +344,38 @@ export function HomePage() {
 
       <p className="status-line">{statusLine}</p>
 
-      {isUncalibrated && (
-        <div className="banner warn" role="alert">
-          <WarningCircle size={22} weight="bold" aria-hidden="true" />
+      {status?.calibrating ? (
+        <div className="banner accent" role="status">
+          <ArrowsVertical size={22} weight="bold" aria-hidden="true" />
           <div className="banner-body">
             <p>
-              <strong>{t("uncal.title")}</strong>
-            </p>
-            <p style={{ marginTop: 4 }}>{t("uncal.steps")}</p>
-            <p style={{ marginTop: 6 }}>
-              <Link to="/debug" style={{ textDecoration: "underline", fontWeight: 600 }}>
-                {t("uncal.syncLink")}
-              </Link>
+              <strong>{t("cal.inProgress")}</strong>
             </p>
           </div>
+          <Link to="/calibrate" className="btn primary small">
+            {t("cal.continue")}
+          </Link>
         </div>
+      ) : (
+        isUncalibrated && (
+          <div className="banner warn" role="alert">
+            <WarningCircle size={22} weight="bold" aria-hidden="true" />
+            <div className="banner-body">
+              <p>
+                <strong>{t("uncal.title")}</strong>
+              </p>
+              <p style={{ marginTop: 4 }}>{t("uncal.steps")}</p>
+              <p style={{ marginTop: 6 }}>
+                <Link to="/debug" style={{ textDecoration: "underline" }}>
+                  {t("uncal.syncLink")}
+                </Link>
+              </p>
+            </div>
+            <Link to="/calibrate" className="btn primary small">
+              {t("uncal.cta")}
+            </Link>
+          </div>
+        )
       )}
 
       <div className="home-grid">

@@ -27,6 +27,7 @@ from models import (
     AutoRequest,
     DebugResponse,
     HealthResponse,
+    LinkRequest,
     LoginRequest,
     LoginResponse,
     ModeRequest,
@@ -37,7 +38,7 @@ from models import (
     TelemetryResponse,
 )
 from protocol import ProtocolCodec
-from transport import LoRaTransport, MockTransport, TTNMqttTransport
+from transport import DualTransport, LoRaTransport, MockTransport, TTNMqttTransport
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,7 +86,7 @@ def create_app(
                 codec=codec, dev_id=active_settings.ttn_devid
             )
         else:
-            active_transport = TTNMqttTransport(
+            ttn_transport = TTNMqttTransport(
                 ttn_appid=active_settings.ttn_appid,
                 mqtt_api_key=active_settings.mqtt_api_key,
                 ttn_region=active_settings.ttn_region,
@@ -95,6 +96,28 @@ def create_app(
                 mqtt_use_tls=active_settings.ttn_mqtt_use_tls,
                 mqtt_ca_certs=active_settings.ttn_mqtt_ca_certs,
             )
+            if active_settings.usb_mqtt_host:
+                # USB/TTN switch: local broker + local_test/mqtt_usb_bridge.py, or real TTN
+
+                def make_usb(**hooks: Any) -> TTNMqttTransport:
+                    return TTNMqttTransport(
+                        ttn_appid=active_settings.ttn_appid,
+                        mqtt_api_key="local",
+                        ttn_tenant=active_settings.ttn_tenant,
+                        mqtt_host=active_settings.usb_mqtt_host,
+                        mqtt_port=active_settings.usb_mqtt_port,
+                        mqtt_use_tls=False,
+                        **hooks,
+                    )
+
+                active_transport = DualTransport(
+                    make_usb,
+                    ttn_transport,
+                    link_default=active_settings.link_default,
+                    state_file=active_settings.link_state_file,
+                )
+            else:
+                active_transport = ttn_transport
 
         manager = DeviceManager(
             settings=active_settings,
@@ -238,6 +261,23 @@ def create_app(
         manager: DeviceManager = Depends(get_manager),
     ) -> OkResponse:
         await manager.set_auto(user_id, body)
+        return OkResponse()
+
+    @application.post("/calibrate", response_model=OkResponse)
+    async def post_calibrate(
+        user_id: uuid.UUID = Depends(require_user),
+        manager: DeviceManager = Depends(get_manager),
+    ) -> OkResponse:
+        await manager.calibrate(user_id)
+        return OkResponse()
+
+    @application.put("/link", response_model=OkResponse)
+    async def put_link(
+        body: LinkRequest,
+        user_id: uuid.UUID = Depends(require_user),
+        manager: DeviceManager = Depends(get_manager),
+    ) -> OkResponse:
+        await manager.set_link(user_id, body.link)
         return OkResponse()
 
     @application.put("/settings", response_model=OkResponse)

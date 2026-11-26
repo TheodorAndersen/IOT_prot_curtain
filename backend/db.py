@@ -475,8 +475,15 @@ class Database:
                 d.is_moving,
                 d.is_calibrated,
                 d.is_day,
+                d.device_flags,
                 d.last_seen_at,
                 d.sync_pending,
+                EXISTS (
+                    SELECT 1 FROM device_commands c
+                    WHERE c.device_id = d.id
+                      AND c.command_kind = 'calibrate'
+                      AND c.status IN ('QUEUED', 'IN_FLIGHT')
+                ) AS calibration_pending,
                 s.auto_open,
                 s.auto_open_time,
                 s.auto_close,
@@ -738,6 +745,43 @@ class Database:
                     dev["id"],
                     CommandKind.SET_POSITION.value,
                     {"position": position},
+                    CommandStatus.QUEUED.value,
+                )
+
+    async def enqueue_calibrate(self, user_id: uuid.UUID) -> None:
+        """Queue a v4.1 'calibrate' command; queued moves are dropped (they would be rejected)."""
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                dev = await conn.fetchrow(
+                    "SELECT * FROM devices WHERE user_id = $1 FOR UPDATE",
+                    user_id,
+                )
+                if dev is None:
+                    raise DatabaseConflictError("device not found")
+                await conn.execute(
+                    """
+                    UPDATE device_commands
+                    SET status = $2, resolved_at = NOW()
+                    WHERE device_id = $1
+                      AND command_kind IN ('set_position', 'calibrate')
+                      AND status = $3
+                    """,
+                    dev["id"],
+                    CommandStatus.SUPERSEDED.value,
+                    CommandStatus.QUEUED.value,
+                )
+                await conn.execute(
+                    "UPDATE devices SET target_position = NULL WHERE id = $1",
+                    dev["id"],
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO device_commands (device_id, command_kind, command_args, status)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    dev["id"],
+                    CommandKind.CALIBRATE.value,
+                    {"action": "start"},
                     CommandStatus.QUEUED.value,
                 )
 

@@ -87,7 +87,8 @@ describe("HomePage and SettingsPage", () => {
       makeStatus({ position: null, calibrated: false })
     );
     renderWithProviders(<HomePage />);
-    await screen.findByText(/Curtain is not calibrated/i);
+    await screen.findByText(/Not calibrated — remote moves are off/i);
+    expect(screen.getByRole("link", { name: "Calibrate" })).toHaveAttribute("href", "/calibrate");
     expect(screen.getByRole("button", { name: "Open fully" })).toBeDisabled();
   });
 

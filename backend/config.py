@@ -47,6 +47,11 @@ class Settings:
     protocol_version: str = "v4"
     handshake_timeout_sec: int | None = None
     app_root_path: str = ""
+    # USB/TTN switch: a second MQTT broker where local_test/mqtt_usb_bridge.py stands in for TTN over USB
+    usb_mqtt_host: str = ""
+    usb_mqtt_port: int = 1883
+    link_default: str = "usb"
+    link_state_file: Path | None = None
 
 
 def _get_str(source: Mapping[str, str], key: str, default: str = "") -> str:
@@ -214,6 +219,16 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     ttn_mqtt_ca_certs = _get_str(source, "TTN_MQTT_CA_CERTS", "")
     sync_on_startup = _get_bool(source, "SYNC_ON_STARTUP", False)
 
+    usb_mqtt_host = _get_str(source, "USB_MQTT_HOST", "")
+    usb_mqtt_port = _get_int(source, "USB_MQTT_PORT", 1883)
+    link_default = (_get_str(source, "LINK_DEFAULT", "usb") or "usb").lower()
+    if link_default not in {"usb", "ttn"}:
+        raise ValueError(f"LINK_DEFAULT must be 'usb' or 'ttn', got {link_default!r}")
+    raw_link_file = _get_str(source, "LINK_STATE_FILE", "") or "link_state.json"
+    link_state_file = Path(raw_link_file)
+    if not link_state_file.is_absolute():
+        link_state_file = (_BASE_DIR / link_state_file).resolve()
+
     return Settings(
         mqtt_api_key=mqtt_api_key,
         ttn_appid=ttn_appid,
@@ -241,4 +256,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         protocol_version=protocol_version,
         handshake_timeout_sec=handshake_timeout_sec,
         app_root_path=app_root_path,
+        usb_mqtt_host=usb_mqtt_host,
+        usb_mqtt_port=usb_mqtt_port,
+        link_default=link_default,
+        link_state_file=link_state_file,
     )

@@ -214,6 +214,7 @@ def test_state_uplink_flags_and_positions(codec: ProtocolCodec) -> None:
         "openBySun": False,
         "closeBySun": True,
         "keepIndoorLight": False,
+        "calibrating": False,
     }
 
     decoded_100 = codec.decode_uplink(1, bytes([0, 0, 0x00, 100]))
@@ -333,3 +334,24 @@ def test_custom_protocol_json_overrides(tmp_path: Path) -> None:
     assert decoded.mode == "automatic"
     assert decoded.keep_indoor_light is True
     assert decoded.position == 33
+
+
+def test_v41_calibrate_command_and_calibrating_flag(codec: ProtocolCodec) -> None:
+    """v4.1: downlink [id] 05 01 starts calibration; uplink flag bit 7 = calibrating."""
+    dl = codec.encode_command(9, "calibrate", {"action": "start"})
+    assert dl.payload == bytes([9, 5, 1])
+    assert codec.decode_downlink(1, dl.payload).kind.value == "calibrate"
+
+    # reply to the command: calibrating, not calibrated, position unknown
+    step1 = codec.decode_uplink(1, bytes([9, 3, 0x80, 255]))
+    assert isinstance(step1, DecodedStateUplink)
+    assert step1.is_calibrating is True and step1.is_calibrated is False and step1.position is None
+    # bottom set: position 100 while still calibrating
+    step2 = codec.decode_uplink(1, bytes([9, 2, 0x80, 100]))
+    assert isinstance(step2, DecodedStateUplink)
+    assert step2.is_calibrating is True and step2.position == 100
+    # done
+    done = codec.decode_uplink(1, bytes([9, 6, 0x04, 0]))
+    assert isinstance(done, DecodedStateUplink)
+    assert done.is_calibrating is False and done.is_calibrated is True and done.reason == "calibrated"
+    assert codec.encode_state_uplink(step1) == (1, bytes([9, 3, 0x80, 255]))

@@ -1193,3 +1193,198 @@ a {
     animation: none !important;
   }
 }
+
+/* ---------- Calibration & connection (v4.1) ---------- */
+.banner.accent {
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
+}
+.banner > .btn {
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.cal-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -6px 0 14px;
+  color: var(--text-2);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+
+.cal-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+}
+.cal-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  color: var(--text-2);
+}
+.cal-step-dot {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.cal-step.current {
+  color: var(--text);
+  font-weight: 650;
+}
+.cal-step.current .cal-step-dot {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.cal-step.done .cal-step-dot {
+  background: var(--ok);
+  color: #fff;
+}
+
+.cal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+.cal-lead {
+  margin: 0;
+  font-size: 1rem;
+}
+.cal-preview,
+.cal-do {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 8px;
+}
+.cal-do {
+  font-size: 1.12rem;
+  font-weight: 600;
+}
+.cal-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 8px 0;
+}
+.cal-instruction {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.cal-saved {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ok);
+  font-weight: 650;
+}
+.cal-ok {
+  color: var(--ok);
+}
+.cal-bad {
+  color: var(--danger);
+}
+.cal-restart {
+  align-self: flex-start;
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+  color: var(--accent-ink);
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* the three buttons on the blind */
+.board-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  padding: 14px 0 4px;
+}
+.board-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.board-btn-face {
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 -3px 0 var(--line-strong);
+}
+.board-btn.hl {
+  color: var(--text);
+}
+.board-btn.hl .board-btn-face {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.18), 0 0 0 5px var(--accent-soft);
+}
+.board-btn-order {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.link-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.9rem;
+}
+.link-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.link-dot.on {
+  background: var(--ok);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

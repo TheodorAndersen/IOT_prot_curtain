@@ -4,7 +4,8 @@ export type CommandKind =
   | "set_position"
   | "set_mode"
   | "set_auto_settings"
-  | "set_schedule";
+  | "set_schedule"
+  | "calibrate";
 
 export type CommandStatus =
   | "QUEUED"
@@ -60,6 +61,12 @@ export interface AutoRequest {
   targetLightLevel: number;
 }
 
+export type Link = "usb" | "ttn";
+
+export interface LinkRequest {
+  link: Link;
+}
+
 export interface SettingsRequest {
   outsideThresholdOpen: number;
   outsideThresholdClose: number;
@@ -84,6 +91,13 @@ export interface StatusResponse {
   downlinksUsed24h: number;
   downlinkBudget24h: number;
   downlinkNextSlotAt: string | null;
+  /** v4.1: calibration with the buttons on the blind is in progress */
+  calibrating?: boolean;
+  /** "sending": calibrate command on its way; "bottom"/"top": the blind waits for that end */
+  calibrationStep?: "sending" | "bottom" | "top" | null;
+  /** USB/TTN switch; null when the backend has no USB link configured */
+  link?: Link | null;
+  usbBridgeOnline?: boolean | null;
 }
 
 export interface DecodedFlags {
@@ -94,6 +108,7 @@ export interface DecodedFlags {
   openBySun: boolean;
   closeBySun: boolean;
   keepIndoorLight: boolean;
+  calibrating?: boolean;
 }
 
 export interface DebugCommand {

@@ -2,6 +2,7 @@ import type {
   AutoRequest,
   DebugResponse,
   HealthResponse,
+  LinkRequest,
   LoginRequest,
   LoginResponse,
   ModeRequest,
@@ -35,6 +36,10 @@ export const api = {
     apiRequest<OkResponse>("PUT", "/settings", req),
 
   postSync: () => apiRequest<OkResponse>("POST", "/sync"),
+
+  postCalibrate: () => apiRequest<OkResponse>("POST", "/calibrate"),
+
+  putLink: (req: LinkRequest) => apiRequest<OkResponse>("PUT", "/link", req),
 
   getDebug: (limit = 20) =>
     apiRequest<DebugResponse>("GET", `/debug?limit=${encodeURIComponent(limit)}`),

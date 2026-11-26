@@ -2,7 +2,8 @@
   "version": "v4",
   "confirmed_downlinks": false,
   "features": {
-    "consolidated_config_downlink": true
+    "consolidated_config_downlink": true,
+    "calibration_command": true
   },
   "cmd_id": {
     "min": 1,
@@ -35,7 +36,8 @@
       "is_day": 3,
       "open_by_sun": 4,
       "close_by_sun": 5,
-      "keep_indoor_light": 6
+      "keep_indoor_light": 6,
+      "is_calibrating": 7
     }
   },
   "downlinks": {
@@ -71,6 +73,12 @@
         "struct_format": ">BBB",
         "fields": ["cmd_id", "opcode", "action"],
         "action_values": {"open": 0, "close": 1}
+      },
+      "calibrate": {
+        "opcode": 5,
+        "struct_format": ">BBB",
+        "fields": ["cmd_id", "opcode", "action"],
+        "action_values": {"start": 1}
       }
     }
   },
