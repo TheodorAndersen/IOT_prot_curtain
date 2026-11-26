@@ -22,7 +22,7 @@ All scripts read their settings from your local gitignored `.env` file (never co
 | 7 | `.\deploy\gcp\scripts\07-verify.ps1` | Verifies DNS, VM swap, `docker compose ps` (zero published ports on Postgres/Backend), `systemd`, and `https://$DOMAIN/health`, `/api/docs`, and `/`. |
 | 99 *(teardown)* | `.\deploy\gcp\scripts\99-teardown.ps1` | Dry-run by default. With `-ConfirmTeardown`, deletes the subdomain `A` record, VM (+ boot disk), firewall rule, and static IP while **preserving** the domain registration, Cloud DNS managed zone, and GCP project. |
 
-**USB link (Settings → Connection → USB cable):** set `USB_MQTT_PASSWORD` in `.env` before step 6 (any long random string; `USB_MQTT_USERNAME` defaults to `bridge`). Step 6 uploads `.env` and starts the `mosquitto` service. The PC with the board plugged in then runs `python usb_bridge/mqtt_usb_bridge.py --server wss://$DOMAIN/mqtt` with the same password in its own `.env` (see [`usb_bridge/README.md`](../../usb_bridge/README.md)). Nothing new to open in the firewall: it goes over 443.
+**USB link (Settings → Connection → USB cable):** nothing to set. Step 6 starts the `mosquitto` service, and the PC with the board plugged in runs `python usb_bridge/mqtt_usb_bridge.py --server wss://$DOMAIN/mqtt` (see [`usb_bridge/README.md`](../../usb_bridge/README.md)). It goes over 443, so nothing new to open in the firewall. No login by default (the broker only carries the curtain's topics); to require one, set `USB_MQTT_PASSWORD` in `.env` here and in the bridge PC's `.env`.
 
 ---
 

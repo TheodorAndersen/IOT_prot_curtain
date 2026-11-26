@@ -8,7 +8,7 @@ Backend, REST API, LoRaWAN v4 codec, React SPA/PWA, and containerized deployment
 - **`backend` (`python:3.15-slim`)**: FastAPI + `asyncpg` + TTN MQTTS / `MockTransport` service driven declaratively by [`backend/protocol.json`](backend/protocol.json) (v4 default) or [`backend/protocol.v3.json`](backend/protocol.v3.json) (`PROTOCOL_VERSION=v3`). Exposes internal port `8000` only on `app_net` (zero host ports).
   - Specs & protocol: [`assets/PROTOCOL_FINAL.md`](assets/PROTOCOL_FINAL.md), [`assets/iot_curtain_motor_backend_specification.md`](assets/iot_curtain_motor_backend_specification.md), [`assets/iot_curtain_motor_frontend_specification.md`](assets/iot_curtain_motor_frontend_specification.md) (legacy docs are in [`assets/archived/`](assets/archived/)).
 - **`nginx` (`nginx:1.31.9-alpine`)**: Serves the built React SPA/PWA (`/` from [`FrontEnd/`](FrontEnd/)) and reverse-proxies REST calls (`/api/*` and `/health`) to `backend:8000` (pinned to `1.31.9` to avoid CVE-2026-123634). Bound strictly to `127.0.0.1:8080` locally, or `80`/`443` with TLS 1.2/1.3 in GCP production.
-- **`mosquitto` (`eclipse-mosquitto:2`)**: MQTT broker for the **USB link** of the app's USB/TTN switch (Settings → Connection). Zero host ports: the backend uses `mosquitto:1883`, and the USB bridge on the PC with the board plugged in ([`usb_bridge/`](usb_bridge/README.md)) comes in through nginx at `/mqtt` (WebSocket). Login `USB_MQTT_USERNAME` / `USB_MQTT_PASSWORD` from `.env`; without a password nobody can log in and only TTN works.
+- **`mosquitto` (`eclipse-mosquitto:2`)**: MQTT broker for the **USB link** of the app's USB/TTN switch (Settings → Connection). Zero host ports: the backend uses `mosquitto:1883`, and the USB bridge on the PC with the board plugged in ([`usb_bridge/`](usb_bridge/README.md)) comes in through nginx at `/mqtt` (WebSocket). No login by default (curtain topics only); set `USB_MQTT_PASSWORD` in `.env` to require one.
 - **`certbot` (`certbot/certbot:latest`)**: Let's Encrypt issuance and automatic 12-hour certificate renewal in GCP production.
 
 ---
@@ -43,7 +43,7 @@ Bound strictly to `127.0.0.1` on host port `${NGINX_HTTP_PORT:-8080}` (default `
 |---|---|
 | `http://<DOMAIN>:80` | Let's Encrypt ACME challenge (`/.well-known/acme-challenge/`) & HTTP-to-HTTPS redirect |
 | `https://<DOMAIN>:443` | Production Web/PWA (`/`, `/login`, `/settings`, `/debug`, `/calibrate`), `/health`, and `/api/*` over TLS 1.2/1.3 |
-| `wss://<DOMAIN>/mqtt` | USB link: `python usb_bridge/mqtt_usb_bridge.py --server wss://<DOMAIN>/mqtt` on the PC with the board plugged in (needs `USB_MQTT_PASSWORD`) |
+| `wss://<DOMAIN>/mqtt` | USB link: `python usb_bridge/mqtt_usb_bridge.py --server wss://<DOMAIN>/mqtt` on the PC with the board plugged in |
 | `http://localhost:5173` | Optional Vite dev server (`cd FrontEnd && npm run dev`; proxies `/api` and `/health` to `http://127.0.0.1:8000`) |
 | `http://127.0.0.1:8000` | Optional bare-metal FastAPI backend (`APP_HOST` / `APP_PORT` in `.env`, Swagger UI at `http://127.0.0.1:8000/docs`) |
 | `http://127.0.0.1:18080` | Temporary port used by `backend/tests/test_docker_e2e.py` (`curtain-e2e-test` Compose project) |
@@ -175,4 +175,4 @@ Invoke-RestMethod "http://127.0.0.1:8080/api/debug?limit=20" -Headers $headers
 
 ## 5. GCP Production Deployment (HTTPS)
 
-See [`deploy/gcp/README.md`](deploy/gcp/README.md) for the complete GCP Compute Engine VM, firewall, Let's Encrypt (`init-letsencrypt.sh`), and `systemd` setup (`deploy/gcp/docker-compose.prod.yml`). Ensure `POSTGRES_PASSWORD`, `DOMAIN`, and `CERTBOT_EMAIL` are set in `.env` before running `./deploy/gcp/init-letsencrypt.sh`. For the USB link also set `USB_MQTT_PASSWORD` (and give it to whoever runs the USB bridge).
+See [`deploy/gcp/README.md`](deploy/gcp/README.md) for the complete GCP Compute Engine VM, firewall, Let's Encrypt (`init-letsencrypt.sh`), and `systemd` setup (`deploy/gcp/docker-compose.prod.yml`). Ensure `POSTGRES_PASSWORD`, `DOMAIN`, and `CERTBOT_EMAIL` are set in `.env` before running `./deploy/gcp/init-letsencrypt.sh`. The USB link needs nothing extra (optional: `USB_MQTT_PASSWORD` to require a login).

@@ -66,8 +66,8 @@ services:
 
   # MQTT broker for the USB link. Not published: the backend uses mqtt://mosquitto:1883 inside Docker,
   # and the USB bridge on the PC comes in through nginx (ws://.../mqtt locally, wss://<DOMAIN>/mqtt in prod).
-  # Login: USB_MQTT_USERNAME (default "bridge") / USB_MQTT_PASSWORD from .env. Without a password nobody
-  # can log in, so the USB link stays off and only TTN works.
+  # No login by default; set USB_MQTT_PASSWORD (and optionally USB_MQTT_USERNAME, default "bridge") in .env
+  # to require one. Clients may only use the curtain's topics (deploy/mosquitto/entrypoint.sh).
   mosquitto:
     image: eclipse-mosquitto:2
     environment:

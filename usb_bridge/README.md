@@ -16,7 +16,7 @@ pip install -r usb_bridge/requirements.txt
 python usb_bridge/mqtt_usb_bridge.py --server wss://<DOMAIN>/mqtt
 ```
 
-It reads the repo's `.env` for `TTN_APPID`, `TTN_DEVID` (part of the MQTT topics, must match the backend's) and `USB_MQTT_PASSWORD`. Put `BRIDGE_SERVER=wss://<DOMAIN>/mqtt` in `.env` to skip `--server`.
+It reads the repo's `.env` for `TTN_APPID`, `TTN_DEVID` (part of the MQTT topics, must match the backend's) and, if the server requires a login, `USB_MQTT_PASSWORD`. Put `BRIDGE_SERVER=wss://<DOMAIN>/mqtt` in `.env` to skip `--server`.
 
 | Backend runs… | `--server` |
 |---|---|
@@ -30,7 +30,7 @@ Only one program can open the COM port: close the Arduino Serial Monitor first. 
 
 ## Server side
 
-`docker-compose.yml` has a `mosquitto` service (not published on the host). The backend reaches it at `mosquitto:1883`, and nginx forwards `/mqtt` (WebSocket) to it, so the bridge needs nothing but HTTPS on port 443. Every client must log in with `USB_MQTT_USERNAME` (default `bridge`) / `USB_MQTT_PASSWORD` from `.env`. Without `USB_MQTT_PASSWORD` nobody can log in: the USB link is off and TTN works as before.
+`docker-compose.yml` has a `mosquitto` service (not published on the host). The backend reaches it at `mosquitto:1883`, and nginx forwards `/mqtt` (WebSocket) to it, so the bridge needs nothing but HTTPS on port 443. By default no login is needed; clients may only use the curtain's topics (`v3/#`, `curtain/#`), so the broker can't be used for anything else. To require a login, set `USB_MQTT_PASSWORD` (and optionally `USB_MQTT_USERNAME`, default `bridge`) in the server's `.env` and in the bridge PC's `.env`.
 
 The active link is saved in the `backend_data` volume and starts as `LINK_DEFAULT` (default `ttn`).
 
