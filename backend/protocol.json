@@ -1,0 +1,89 @@
+{
+  "version": "v4",
+  "confirmed_downlinks": false,
+  "features": {
+    "consolidated_config_downlink": true
+  },
+  "cmd_id": {
+    "min": 1,
+    "max": 255
+  },
+  "handshake": {
+    "timeout_sec": 25,
+    "max_attempts": 2,
+    "daily_downlink_warn_threshold": 10
+  },
+  "state_uplink": {
+    "f_port": 1,
+    "struct_format": ">BBBB",
+    "fields": ["last_cmd_id", "reason", "flags", "position"],
+    "uncalibrated_position": 255,
+    "reasons": {
+      "0": "heartbeat",
+      "1": "startup",
+      "2": "button",
+      "3": "app_command",
+      "4": "auto",
+      "5": "schedule",
+      "6": "calibrated",
+      "7": "rejected"
+    },
+    "flag_bits": {
+      "automatic": 0,
+      "is_moving": 1,
+      "is_calibrated": 2,
+      "is_day": 3,
+      "open_by_sun": 4,
+      "close_by_sun": 5,
+      "keep_indoor_light": 6
+    }
+  },
+  "downlinks": {
+    "f_port": 1,
+    "commands": {
+      "set_position": {
+        "opcode": 1,
+        "struct_format": ">BBB",
+        "fields": ["cmd_id", "opcode", "position"]
+      },
+      "set_mode": {
+        "opcode": 2,
+        "struct_format": ">BBB",
+        "fields": ["cmd_id", "opcode", "mode"],
+        "mode_values": {"manual": 0, "automatic": 1}
+      },
+      "set_auto_settings": {
+        "opcode": 3,
+        "struct_format": ">BBBBBB",
+        "fields": ["cmd_id", "opcode", "cfg", "target_light_level", "outside_threshold_open", "outside_threshold_close"],
+        "cfg_bits": {
+          "auto_open": 0,
+          "auto_close": 1,
+          "maintain_light": 2,
+          "automatic": 3,
+          "is_day": 4,
+          "set_mode": 5,
+          "set_day": 6
+        }
+      },
+      "set_schedule": {
+        "opcode": 4,
+        "struct_format": ">BBB",
+        "fields": ["cmd_id", "opcode", "action"],
+        "action_values": {"open": 0, "close": 1}
+      }
+    }
+  },
+  "telemetry_uplink": {
+    "enabled": false,
+    "f_port": 2,
+    "struct_format": ">BB12H",
+    "fields": ["version", "status_flags", "light_samples"],
+    "schema_version": 1,
+    "sample_count": 12,
+    "sample_interval_min": 5,
+    "max_raw_value": 1024,
+    "sensor": "outside",
+    "unit": "raw_adc"
+  }
+}

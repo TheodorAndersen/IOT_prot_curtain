@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+FrontEnd/node_modules/
+FrontEnd/dist/
+FrontEnd/ios/
+FrontEnd/android/
+*.tsbuildinfo

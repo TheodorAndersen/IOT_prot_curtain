@@ -1,0 +1,16 @@
+[Unit]
+Description=IoT Smart Curtain Backend (Docker Compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/iot_prot_curtain
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml -f deploy/gcp/docker-compose.prod.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

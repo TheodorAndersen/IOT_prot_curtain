@@ -1,0 +1,75 @@
+networks:
+  db_internal:
+    driver: bridge
+    internal: true
+  app_net:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:19-alpine
+    networks:
+      - db_internal
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-curtain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-curtain}
+      POSTGRES_DB: ${POSTGRES_DB:-curtain}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-curtain} -d $${POSTGRES_DB:-curtain}"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-curtain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-curtain}
+      POSTGRES_DB: ${POSTGRES_DB:-curtain}
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      APP_ROOT_PATH: /api
+      TRANSPORT_MODE: ${TRANSPORT_MODE:-ttn_mqtt}
+      PROTOCOL_VERSION: ${PROTOCOL_VERSION:-v4}
+    networks:
+      - db_internal
+      - app_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./FrontEnd
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:${NGINX_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx/default.http.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - app_net
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
