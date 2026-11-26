@@ -1,21 +1,25 @@
 param(
-    [switch]$SkipDnsCheck
+    [switch]$SkipDnsCheck,
+    [switch]$UploadLocal
 )
 
 . (Join-Path $PSScriptRoot "_load-env.ps1")
 
 Assert-Gcloud
 $cfg = Import-DeployEnv
-Assert-EnvKeys -EnvMap $cfg -Keys @(
+$requiredKeys = @(
     "GCP_PROJECT",
     "GCP_ZONE",
     "GCP_VM_NAME",
-    "DEPLOY_REPO_URL",
     "DEPLOY_APP_DIR",
     "DOMAIN",
     "CERTBOT_EMAIL",
     "POSTGRES_PASSWORD"
 )
+if (-not $UploadLocal) {
+    $requiredKeys += "DEPLOY_REPO_URL"
+}
+Assert-EnvKeys -EnvMap $cfg -Keys $requiredKeys
 
 if ($cfg["CERTBOT_EMAIL"] -eq "you@example.com") {
     throw "CERTBOT_EMAIL in .env is still a placeholder. Set your real email first."
@@ -24,7 +28,7 @@ if ($cfg["CERTBOT_EMAIL"] -eq "you@example.com") {
 $project = $cfg["GCP_PROJECT"]
 $zone = $cfg["GCP_ZONE"]
 $vmName = $cfg["GCP_VM_NAME"]
-$repoUrl = $cfg["DEPLOY_REPO_URL"]
+$repoUrl = if ($cfg.ContainsKey("DEPLOY_REPO_URL")) { $cfg["DEPLOY_REPO_URL"] } else { "" }
 $appDir = $cfg["DEPLOY_APP_DIR"]
 $domain = $cfg["DOMAIN"].Trim().TrimEnd(".")
 $staticIp = Resolve-StaticIp -EnvMap $cfg
@@ -49,8 +53,36 @@ if ($bootCode -ne 0) {
     throw "VM bootstrap not ready yet. Inspect /var/log/curtain-bootstrap.log on the VM and re-run once complete."
 }
 
-Write-Host "==> Cloning/updating repo at $appDir..."
-$repoPrepCmd = @"
+if ($UploadLocal) {
+    Write-Host "==> Archiving committed repo (HEAD) and uploading to $appDir..."
+    $repoRoot = Get-RepoRoot
+    $tmpTar = Join-Path ([System.IO.Path]::GetTempPath()) ("curtain-src-" + [guid]::NewGuid().ToString("N") + ".tar.gz")
+    try {
+        & git -C $repoRoot archive --format=tar.gz -o $tmpTar HEAD
+        if ($LASTEXITCODE -ne 0) {
+            throw "git archive failed."
+        }
+        [void](Invoke-Gcloud -Arguments @(
+            "compute", "scp", $tmpTar, "${vmName}:/tmp/curtain-src.tar.gz",
+            "--project=$project", "--zone=$zone"
+        ))
+    } finally {
+        if (Test-Path -LiteralPath $tmpTar) {
+            Remove-Item -LiteralPath $tmpTar -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $extractCmd = @"
+set -euo pipefail
+sudo mkdir -p "$appDir"
+sudo chown "`$(id -un):`$(id -gn)" "$appDir"
+tar -xzf /tmp/curtain-src.tar.gz -C "$appDir"
+rm -f /tmp/curtain-src.tar.gz
+"@
+    [void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $extractCmd)
+} else {
+    Write-Host "==> Cloning/updating repo at $appDir..."
+    $repoPrepCmd = @"
 set -euo pipefail
 if [[ ! -d "$appDir/.git" ]]; then
   sudo mkdir -p "$appDir"
@@ -61,7 +93,8 @@ else
   git pull --ff-only
 fi
 "@
-[void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $repoPrepCmd)
+    [void](Invoke-GcloudSshScript -VmName $vmName -Project $project -Zone $zone -Script $repoPrepCmd)
+}
 
 Write-Host "==> Uploading .env securely to $appDir/.env..."
 $localEnv = Get-EnvFilePath
