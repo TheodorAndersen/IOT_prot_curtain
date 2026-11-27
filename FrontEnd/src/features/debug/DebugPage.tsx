@@ -76,6 +76,52 @@ export function DebugPage() {
   const pctUsed = Math.min(100, Math.round((used / Math.max(1, budget)) * 100));
   const budgetSeverity = used >= budget ? "danger" : used >= Math.max(1, budget - 2) ? "warn" : "";
 
+  // USB/TTN switch (only when the server has USB_MQTT_HOST). It needs only /status, so it stays
+  // usable even when GET /debug fails.
+  const linkCard =
+    status?.link != null ? (
+      <section className="dcard" aria-labelledby="h-debug-link">
+        <h2 id="h-debug-link">
+          <span>{t("link.title")}</span>
+          <span className={`pill ${status.usbBridgeOnline ? "ok" : "warn"}`}>
+            {shownLink === "usb" ? t("link.pillUsb") : t("link.pillTtn")}
+          </span>
+        </h2>
+        <div className="seg seg-lg" role="radiogroup" aria-labelledby="h-debug-link">
+          {(["usb", "ttn"] as LinkKind[]).map((l) => (
+            <button
+              key={l}
+              type="button"
+              role="radio"
+              aria-checked={shownLink === l}
+              className={`seg-btn${shownLink === l ? " active" : ""}`}
+              disabled={linkMutation.isPending}
+              onClick={() => {
+                if (status?.link !== l) linkMutation.mutate(l);
+              }}
+            >
+              {l === "usb" ? (
+                <Usb size={20} aria-hidden="true" />
+              ) : (
+                <Broadcast size={20} aria-hidden="true" />
+              )}
+              <span>{l === "usb" ? t("link.usb") : t("link.ttn")}</span>
+            </button>
+          ))}
+        </div>
+        <p className="link-state" style={{ marginTop: 10 }}>
+          <span
+            className={`link-dot${status.usbBridgeOnline ? " on" : ""}`}
+            aria-hidden="true"
+          />
+          {status.usbBridgeOnline ? t("link.pcOnline") : t("link.pcOffline")}
+        </p>
+        <p className="group-note" style={{ margin: "6px 0 0" }}>
+          {shownLink === "usb" ? t("link.noteUsb") : t("link.noteTtn")}
+        </p>
+      </section>
+    ) : null;
+
   return (
     <AppShell wide>
       <div className="page-head">
@@ -156,7 +202,7 @@ export function DebugPage() {
         </div>
       )}
 
-      {data && (
+      {data ? (
         <div className="debug-grid">
           {/* Card 1: System, Transport & Budget */}
           <section className="dcard">
@@ -203,49 +249,7 @@ export function DebugPage() {
             </div>
           </section>
 
-          {/* Optional USB/TTN Debug Transport Switch (only when USB_MQTT_HOST is enabled) */}
-          {status?.link != null && (
-            <section className="dcard" aria-labelledby="h-debug-link">
-              <h2 id="h-debug-link">
-                <span>{t("link.title")}</span>
-                <span className={`pill ${status.usbBridgeOnline ? "ok" : "warn"}`}>
-                  {shownLink === "usb" ? t("link.pillUsb") : t("link.pillTtn")}
-                </span>
-              </h2>
-              <div className="seg seg-lg" role="radiogroup" aria-labelledby="h-debug-link">
-                {(["usb", "ttn"] as LinkKind[]).map((l) => (
-                  <button
-                    key={l}
-                    type="button"
-                    role="radio"
-                    aria-checked={shownLink === l}
-                    className={`seg-btn${shownLink === l ? " active" : ""}`}
-                    disabled={linkMutation.isPending}
-                    onClick={() => {
-                      if (status?.link !== l) linkMutation.mutate(l);
-                    }}
-                  >
-                    {l === "usb" ? (
-                      <Usb size={20} aria-hidden="true" />
-                    ) : (
-                      <Broadcast size={20} aria-hidden="true" />
-                    )}
-                    <span>{l === "usb" ? t("link.usb") : t("link.ttn")}</span>
-                  </button>
-                ))}
-              </div>
-              <p className="link-state" style={{ marginTop: 10 }}>
-                <span
-                  className={`link-dot${status.usbBridgeOnline ? " on" : ""}`}
-                  aria-hidden="true"
-                />
-                {status.usbBridgeOnline ? t("link.pcOnline") : t("link.pcOffline")}
-              </p>
-              <p className="group-note" style={{ margin: "6px 0 0" }}>
-                {shownLink === "usb" ? t("link.noteUsb") : t("link.noteTtn")}
-              </p>
-            </section>
-          )}
+          {linkCard}
 
           {/* Card 2: Live Device State & Flags */}
           <section className="dcard">
@@ -355,6 +359,24 @@ export function DebugPage() {
             lang={lang}
           />
         </div>
+      ) : (
+        <>
+          {debugQ.isError && (
+            <div className="banner danger" role="alert">
+              <div className="banner-body">
+                <p>
+                  {t("debug.loadError", {
+                    msg: debugQ.error instanceof Error ? debugQ.error.message : t("err.network"),
+                  })}
+                </p>
+              </div>
+              <button type="button" className="btn ghost small" onClick={() => void debugQ.refetch()}>
+                {t("offline.retry")}
+              </button>
+            </div>
+          )}
+          {linkCard && <div className="debug-grid">{linkCard}</div>}
+        </>
       )}
 
       <p className="group-note" style={{ marginTop: 14 }}>

@@ -159,6 +159,7 @@ export const da = {
   "debug.lastCmd": "Seneste sendte kommando & Kø",
   "debug.lastUplink": "Seneste modtagne uplink",
   "debug.wireLog": "Samlet Wire-log (DL / UL)",
+  "debug.loadError": "Kunne ikke hente diagnostikken: {msg}",
   "debug.usbNote": "Til USB-seriel test (#L lysdata, BTN U/D/S, TICK, CAL), brug FrontEnd/local_test/.",
   "uncal.cta": "Kalibrér",
   "cal.title": "Kalibrér",

@@ -251,4 +251,40 @@ describe("DebugPage", () => {
     fireEvent.click(usbBtn);
     await waitFor(() => expect(linkSpy).toHaveBeenCalledWith({ link: "usb" }));
   });
+
+  it("keeps the USB/TTN switch and shows the error when GET /debug fails", async () => {
+    vi.spyOn(api, "getStatus").mockResolvedValue({
+      position: null,
+      mode: "automatic",
+      autoOpen: 0,
+      autoOpenTime: "07:30",
+      autoClose: 1,
+      autoCloseTime: "21:00",
+      maintainLight: 0,
+      targetLightLevel: 60,
+      outsideThresholdOpen: 80,
+      outsideThresholdClose: 10,
+      moving: false,
+      calibrated: false,
+      day: false,
+      targetPosition: null,
+      lastSeenAt: null,
+      downlinksUsed24h: 0,
+      downlinkBudget24h: 10,
+      downlinkNextSlotAt: null,
+      link: "ttn",
+      usbBridgeOnline: true,
+    });
+    vi.spyOn(api, "getDebug").mockRejectedValue(new Error("Internal Server Error"));
+    const linkSpy = vi.spyOn(api, "putLink").mockResolvedValue({ ok: true });
+
+    renderDebug();
+    // The switch shows as soon as /status answers, without waiting for /debug.
+    fireEvent.click(await screen.findByRole("radio", { name: /USB cable/i }));
+    // useDebugPolling retries once (~1 s) before the error shows.
+    expect(
+      await screen.findByText(/Could not load the diagnostics: Internal Server Error/, {}, { timeout: 5000 })
+    ).toBeInTheDocument();
+    await waitFor(() => expect(linkSpy).toHaveBeenCalledWith({ link: "usb" }));
+  });
 });

@@ -159,6 +159,7 @@ export const en = {
   "debug.lastCmd": "Last Command Sent & Queue",
   "debug.lastUplink": "Last Uplink Received",
   "debug.wireLog": "Unified Wire Traffic Log (DL / UL)",
+  "debug.loadError": "Could not load the diagnostics: {msg}",
   "debug.usbNote": "For USB serial bench testing (#L light readings, BTN U/D/S, TICK, CAL), use FrontEnd/local_test/.",
   "uncal.cta": "Calibrate",
   "cal.title": "Calibrate",
