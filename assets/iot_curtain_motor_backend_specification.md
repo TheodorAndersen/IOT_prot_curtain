@@ -70,7 +70,7 @@ backend/
 | Read A0/A1 light sensors, 5-min average (`tickMs`), drive 28BYJ-48 stepper | **Device** | Operates offline with zero airtime (`STEP_US = 3000`). |
 | Open/close **by sun** (outdoor A0 thresholds `thrOpen` / `thrClose`) | **Device** | Needs live outdoor sensor; includes `openArmed` hysteresis. |
 | Keep indoor light at `target` ± `5 %` during `day` (max `25 %` travel/tick) | **Device** | Needs live indoor A1 sensor; skips move inside deadband. |
-| Physical buttons (`Up D3` / `Down D4` / `Stop D5`) & calibration (`travel`) | **Device** | Local override ("person at the window wins"): switches to `manual` and emits `button` uplink. |
+| Physical buttons (`Up D5` / `Down D3` / `Stop D4`) & calibration (`travel`) | **Device** | Local override ("person at the window wins"): switches to `manual` and emits `button` uplink. |
 | Persist config, calibration, link & `lastId` across reboots | **Device (EEPROM)** | `smart_curtain.ino` stores `{magic, autoMode, config, target, thrOpen, thrClose, lastId, dayOpen, travel, pos, link}` in EEPROM (`MAGIC = 0xC3`). |
 | Open/close **by time** (`"HH:MM"`, Danish local time) | **Backend** | Device has **no clock**; backend sends Type 4 (`set_schedule`) at the target minute. |
 | Store schedule times, thresholds, desired mode & last confirmed Type 3 | **Backend** | 4-byte uplink echoes `mode`, `day`, and bits 0–2 of `cfg`, **not** times, `target`, `thrOpen`, or `thrClose`. |
@@ -631,7 +631,7 @@ A Docker Compose single-VM stack (`docker-compose.yml` + `deploy/gcp/docker-comp
 ## 8. Firmware Reference, Verification & Operational Edge Cases
 
 ### Device-Side Rules Reference (`PROTOCOL_FINAL.md` & `smart_curtain.ino`)
-* **Hardware Wiring (`smart_curtain.ino`):** Outdoor LDR `A0`, Indoor LDR `A1`, Buttons `UP D3 / DOWN D4 / STOP D5` (`HIGH` = pressed, 30 ms debounce), ULN2003 coils `D6..D9` (`STEP_US = 3000`, 28BYJ-48 half-steps), RN2483 `TX → D10, RX ← D11, RST D12`.
+* **Hardware Wiring (`smart_curtain.ino`):** Outdoor LDR `A0`, Indoor LDR `A1`, Buttons `UP D5 / DOWN D3 / STOP D4` (`HIGH` = pressed, 30 ms debounce), ULN2003 coils `D6..D9` (`STEP_US = 3000`, 28BYJ-48 half-steps), RN2483 `TX → D10, RX ← D11, RST D12`.
 * **5-Minute Sensor Tick (`tickMs = 300000 ms`):** Averages 1 Hz LDR samples every 5 minutes (`outPct`, `inPct` in `0–100 %`). In `automatic` mode:
   * **By sun:** opens when `outPct > thrOpen` (requires `openArmed == true`, reset when `outPct < thrClose`); closes when `outPct < thrClose` (clears `openArmed = false`).
   * **Day + keep indoor light:** aims for `target ± 5 %` (`DEADBAND = 5`). Inside deadband, stays put; outside, moves by `err = target - inPct` capped at `±25 %` (`MAX_STEP = 25`) of travel per tick. If the room is already brighter than `target`, the blind remains closed all day.

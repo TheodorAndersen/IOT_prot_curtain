@@ -124,7 +124,7 @@ Work out what to send when the command's turn comes, not when the REST call arri
   - **Day without keep-light:** fully open. **Night:** fully closed.
   - With keep indoor light on, "open by time" doesn't open fully: the indoor target sets the daytime position. If the room is brighter than the target, the blind stays closed all day, and the evening close has nothing to do.
 - **Right after `mode`, `auto` or `schedule`:** the same decision runs at once, even mid-move. The newest command wins: the motor changes course or stops.
-- **Buttons** (Up D3 / Down D4 / Stop D5): Up = fully open, Down = fully closed, Stop = stop. Any press switches to manual: the person at the window wins.
+- **Buttons** (Up D5 / Down D3 / Stop D4): Up = fully open, Down = fully closed, Stop = stop. Any press switches to manual: the person at the window wins.
 - **Calibration:** see below. Travel and position are saved in EEPROM.
 - **No clock** on the device. The backend stamps messages when they arrive.
 

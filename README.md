@@ -169,7 +169,7 @@ Invoke-RestMethod "http://127.0.0.1:8080/api/debug?limit=20" -Headers $headers
   - **Native mobile (Capacitor):** Set `VITE_API_BASE_URL=https://<your-domain>/api` when building, then run `npx cap add ios` / `npx cap add android` and `npx cap sync` from [`FrontEnd/`](FrontEnd/).
 - **Calibration from the app (protocol v4.1):** Settings → Blind → Calibrate, or the banner on Home while the blind is uncalibrated. The app sends `[id] 05 01` (`POST /api/calibrate`) and then follows the steps on the blind's buttons: Down…Stop = bottom, Up…Stop = top. `/api/status` has `calibrating` and `calibrationStep` (`sending`, `bottom`, `top`).
 - **USB/TTN switch:** Settings → Connection (`PUT /api/link`, `/api/status` has `link` and `usbBridgeOnline`). USB = the board on a PC's USB port via [`usb_bridge/mqtt_usb_bridge.py`](usb_bridge/README.md), same FPort 1 bytes, no TTN downlink budget used. TTN = LoRaWAN, Class C.
-- **Firmware:** [`firmware/smart_curtain/`](firmware/smart_curtain/smart_curtain.ino) is v4.1b (protocol v4.1 + radio watchdog). Copy `Credentials.example.h` to `Credentials.h` with the OTAA keys (private, gitignored). Serial test lines over USB: `BTN U|D|S`, `TICK`, `CAL`, `STATE`, `LINK U|L`.
+- **Firmware:** [`firmware/smart_curtain/`](firmware/smart_curtain/smart_curtain.ino) is v4.1c (protocol v4.1 + radio watchdog + Idle sleep; buttons Up D5 / Down D3 / Stop D4). Copy `Credentials.example.h` to `Credentials.h` with the OTAA keys (private, gitignored). Serial test lines over USB: `BTN U|D|S`, `TICK`, `CAL`, `STATE`, `LINK U|L`.
 
 ---
 

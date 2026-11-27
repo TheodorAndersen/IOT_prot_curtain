@@ -1,7 +1,9 @@
-// Smart Curtains firmware v4.1b · protocol v4.1 = v4 + calibration from the app (see 05_final_project/lorawan/PROTOCOL.md)
+// Smart Curtains firmware v4.1c · protocol v4.1 = v4 + calibration from the app (see 05_final_project/lorawan/PROTOCOL.md)
 // v4.1b: radio watchdog. When the RN2483 stops answering, re-sync its baud rate, else reset it and rejoin.
-// Board: Arduino Pro Mini 3.3 V / 8 MHz. Wiring as in the 08_Curtain_Controller reference:
-//   A0 outdoor LDR · A1 indoor LDR · buttons UP D3, DOWN D4, STOP D5 (HIGH = pressed, external pull-downs)
+// v4.1c (27 Nov): buttons rewired (UP D5, STOP D4, DOWN D3). Power saving: the CPU sleeps (Idle mode) between
+//   loop passes while the motor stands still, unused parts of the chip are switched off, the ADC is on only while reading.
+// Board: Arduino Pro Mini 3.3 V / 8 MHz. Wiring (27 Nov; otherwise as in the 08_Curtain_Controller reference):
+//   A0 outdoor LDR · A1 indoor LDR · buttons UP D5, DOWN D3, STOP D4 (HIGH = pressed, external pull-downs)
 //   ULN2003 IN1..IN4 on D6..D9 · RN2483 TX → D10, RX ← D11, RST D12 · no home switch: calibrate with the buttons
 // Calibration (started by the app's "calibrate" downlink, "CAL" over USB, or any button while uncalibrated):
 //   DOWN runs the motor until STOP = the bottom, then UP runs it until STOP = the top. DOWN/UP can correct in between.
@@ -15,6 +17,8 @@
 //   "STATE", "LINK U|L", "RADIO <command>" (raw RN2483 command while joined, e.g. "RADIO mac get dr")
 #include <EEPROM.h>
 #include <SoftwareSerial.h>
+#include <avr/power.h>
+#include <avr/sleep.h>
 #if __has_include("Credentials.h")
 #include "Credentials.h"                       // appEui, appKey for the OTAA join (private: not in the hand-in zip)
 const bool HAVE_KEYS = true;
@@ -25,7 +29,7 @@ const bool HAVE_KEYS = false;
 
 // ---------- hardware ----------
 const byte PIN_OUT = A0, PIN_IN = A1;
-const byte BTN[3] = {3, 4, 5};                 // UP, DOWN, STOP
+const byte BTN[3] = {5, 3, 4};                 // UP, DOWN, STOP (rewired 27 Nov)
 const byte COIL[4] = {6, 7, 8, 9};
 const byte PHASES[8] = {1, 3, 2, 6, 4, 12, 8, 9};
 const int UP_SIGN = 1;                         // set to -1 if UP turns the motor the wrong way
@@ -487,11 +491,18 @@ void serviceLink() {
 }
 
 // ---------- sensors, ticks, heartbeat ----------
+// The ADC draws current whenever it is enabled, so it is on only for the four readings per second.
+void adcOn() { power_adc_enable(); ADCSRA |= _BV(ADEN); }
+void adcOff() { ADCSRA &= ~_BV(ADEN); power_adc_disable(); }   // ADEN must be cleared before the ADC's clock stops
+unsigned int readLight(byte pin) { analogRead(pin); return analogRead(pin); }   // 1st read after switching input: discard
+
 void serviceSensors() {
   if (millis() - lastSample < 1000) return;
   lastSample = millis();
-  analogRead(PIN_OUT); liveOut = analogRead(PIN_OUT);
-  analogRead(PIN_IN);  liveIn = analogRead(PIN_IN);
+  adcOn();
+  liveOut = readLight(PIN_OUT);
+  liveIn = readLight(PIN_IN);
+  adcOff();
   sumOut += liveOut; sumIn += liveIn; samples++;
   if (millis() - tickStart >= tickMs) {
     tickStart = millis();
@@ -517,7 +528,39 @@ void serviceBudget() {
   if (millis() - lastSent >= HEARTBEAT_MS) sendState(R_HEARTBEAT, true);
 }
 
+// ---------- power saving (v4.1c) ----------
+// Idle mode stops only the CPU: timers, USB serial and the radio's serial pin keep running, and any interrupt wakes it
+// at once. Timer0 (millis) ticks every 2 ms at 8 MHz, so the loop still runs about 500 times a second and the buttons,
+// the radio and the USB link behave as before. Deeper modes would lose the first byte of a Class C downlink.
+// Measured 27 Nov: the CPU is awake about 4.5 % of the time while the motor stands still (was 100 %).
+// The Pro Mini's red power LED is wired straight to the supply: software can't switch it off (desolder it or its resistor).
+void powerSetup() {
+  power_spi_disable(); power_twi_disable();                  // not used
+  power_timer1_disable(); power_timer2_disable();            // no PWM, tone or servo; SoftwareSerial needs no timer
+  ACSR |= _BV(ACD);                                          // analog comparator off
+  DIDR0 = _BV(ADC0D) | _BV(ADC1D);                           // A0/A1 sit mid-rail: their digital input buffers would leak
+  pinMode(LED_BUILTIN, OUTPUT); digitalWrite(LED_BUILTIN, LOW);   // D13 LED off (unused, nothing else on D13)
+  adcOff();
+}
+
+void idle() {
+  if (dir || rOutPos < rOutLen) return;                      // a moving motor and radio output need every loop pass
+  set_sleep_mode(SLEEP_MODE_IDLE);
+  sleep_mode();                                              // wakes on the next interrupt, at most ~2 ms later
+}
+
+void printResetCause(byte f) {                               // "brown-out" = the supply dipped: check the power wiring
+  Serial.print(F("# Reset:"));
+  if (f & _BV(PORF)) Serial.print(F(" power-on"));
+  if (f & _BV(EXTRF)) Serial.print(F(" reset-pin"));         // also every time a program opens the USB port
+  if (f & _BV(BORF)) Serial.print(F(" brown-out"));
+  if (f & _BV(WDRF)) Serial.print(F(" watchdog"));
+  if (!f) Serial.print(F(" none (software restart)"));
+  Serial.println();
+}
+
 void setup() {
+  byte resetFlags = MCUSR; MCUSR = 0;
   Serial.begin(9600);
   for (byte i = 0; i < 3; i++) pinMode(BTN[i], INPUT);
   for (byte i = 0; i < 4; i++) pinMode(COIL[i], OUTPUT);
@@ -530,9 +573,11 @@ void setup() {
   if (st.travel < 0 || st.pos < 0 || st.pos > st.travel) { st.travel = 0; st.pos = 0; save(); }
   if (st.link > LINK_LORA) { st.link = LINK_USB; save(); }  // EEPROM from before the LoRa link existed
   goal = st.pos;
-  analogRead(PIN_OUT); outPct = pct(analogRead(PIN_OUT));
-  analogRead(PIN_IN);  inPct = pct(analogRead(PIN_IN));
-  Serial.println(F("# Smart Curtains fw v4.1b"));
+  outPct = pct(readLight(PIN_OUT));
+  inPct = pct(readLight(PIN_IN));
+  powerSetup();                                              // after the first readings: this switches the ADC off
+  Serial.println(F("# Smart Curtains fw v4.1c"));
+  printResetCause(resetFlags);
   printLink();
   if (st.link == LINK_LORA) radioStart(); else radioStop();
   if (!calibrated()) Serial.println(F("# Not calibrated: DOWN to the bottom, STOP, then UP to the top, STOP"));
@@ -546,4 +591,5 @@ void loop() {
   serviceSensors();
   serviceBudget();
   serviceRadio();
+  idle();
 }
